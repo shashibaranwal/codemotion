@@ -1,0 +1,46 @@
+name = "High contrast"
+
+[background]
+gradient = ["#000000", "#0B0B0B"]
+blobs = ["#1C1C1C", "#161616"]
+
+[card]
+fill = "#000000"
+border = "#FFFFFF"
+shadow = "#00000000"
+
+[chrome]
+dots = ["#FF6B6B", "#FFD400", "#3DDC84"]
+tab_text = "#E0E0E0"
+
+[text]
+default = "#FFFFFF"
+gutter = "#C8C8C8"
+cursor = "#FFD400"
+
+[accent]
+color = "#FFD400"
+
+# Keys are Pygments token types; lookup falls back to the parent type, then text.default.
+[tokens]
+Keyword = "#FFD400"
+"Keyword.Constant" = "#00E5FF"
+"Name.Function" = "#7CFF6B"
+"Name.Class" = "#00E5FF"
+"Name.Builtin" = "#00E5FF"
+"Name.Builtin.Pseudo" = "#FF9BE0"
+"Name.Decorator" = "#FFD400"
+String = "#FFC266"
+"String.Doc" = "#E0E0E0"
+"String.Interpol" = "#00E5FF"
+"String.Escape" = "#00E5FF"
+Number = "#FF9BE0"
+Comment = "#E0E0E0"
+Operator = "#FFFFFF"
+"Operator.Word" = "#FFD400"
+Punctuation = "#FFFFFF"
+
+[terminal]
+fill = "#000000"
+prompt = "#FFD400"
+text = "#FFFFFF"

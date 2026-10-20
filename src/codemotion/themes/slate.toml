@@ -1,0 +1,46 @@
+name = "Slate"
+
+[background]
+gradient = ["#0D1417", "#15252C"]
+blobs = ["#1FA39A", "#D9963A"]
+
+[card]
+fill = "#111A1E"
+border = "#FFFFFF14"
+shadow = "#00000066"
+
+[chrome]
+dots = ["#FF5F57", "#FEBC2E", "#28C840"]
+tab_text = "#8FA3A8"
+
+[text]
+default = "#E3ECEA"
+gutter = "#4E646A"
+cursor = "#E3ECEA"
+
+[accent]
+color = "#2EC4B6"
+
+# Keys are Pygments token types; lookup falls back to the parent type, then text.default.
+[tokens]
+Keyword = "#FFA759"
+"Keyword.Constant" = "#D4BFFF"
+"Name.Function" = "#FFD173"
+"Name.Class" = "#73D0FF"
+"Name.Builtin" = "#5CCFE6"
+"Name.Builtin.Pseudo" = "#F28779"
+"Name.Decorator" = "#FFD173"
+String = "#D5FF80"
+"String.Doc" = "#8AA3A8"
+"String.Interpol" = "#5CCFE6"
+"String.Escape" = "#95E6CB"
+Number = "#DFBFFF"
+Comment = "#7A9095"
+Operator = "#F29E74"
+"Operator.Word" = "#FFA759"
+Punctuation = "#B8CFE6"
+
+[terminal]
+fill = "#0A1013"
+prompt = "#2EC4B6"
+text = "#C9D6D8"

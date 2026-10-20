@@ -1,0 +1,46 @@
+name = "Midnight"
+
+[background]
+gradient = ["#0B1020", "#1B1440"]
+blobs = ["#5B5BF7", "#C04BD8"]
+
+[card]
+fill = "#11162A"
+border = "#FFFFFF14"
+shadow = "#00000059"
+
+[chrome]
+dots = ["#FF5F57", "#FEBC2E", "#28C840"]
+tab_text = "#9AA4BF"
+
+[text]
+default = "#E6E9F2"
+gutter = "#4A5272"
+cursor = "#E6E9F2"
+
+[accent]
+color = "#7C7CFF"
+
+# Keys are Pygments token types; lookup falls back to the parent type, then text.default.
+[tokens]
+Keyword = "#C792EA"
+"Keyword.Constant" = "#F78C6C"
+"Name.Function" = "#82AAFF"
+"Name.Class" = "#FFCB6B"
+"Name.Builtin" = "#89DDFF"
+"Name.Builtin.Pseudo" = "#F07178"
+"Name.Decorator" = "#FFCB6B"
+String = "#C3E88D"
+"String.Doc" = "#7F8AB0"
+"String.Interpol" = "#89DDFF"
+"String.Escape" = "#89DDFF"
+Number = "#F78C6C"
+Comment = "#5C6688"
+Operator = "#89DDFF"
+"Operator.Word" = "#C792EA"
+Punctuation = "#A6ACCD"
+
+[terminal]
+fill = "#0A0D1A"
+prompt = "#7C7CFF"
+text = "#C8CCDA"

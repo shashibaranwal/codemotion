@@ -1,0 +1,111 @@
+# CodeMotion
+
+Turn a Python video script into a short, polished motion-graphic video (≤ 12 s) for Reels,
+Shorts, LinkedIn and presentations. Everything runs offline on your PC, in a desktop app or
+from the command line.
+
+> **Status: all six milestones of `SPEC.md` are done** (desktop app, script API, themes,
+> GIF/WebM export, multiprocess rendering, Windows package).
+
+| Code explainer | Terminal | Diagram |
+|:---:|:---:|:---:|
+| ![A code card types itself and highlights lines](docs/media/code_explainer.gif) | ![Code, then a terminal running it](docs/media/terminal_demo.gif) | ![Boxes and arrows with a moving request](docs/media/request_flow.gif) |
+
+## A video script
+
+```python
+from codemotion import Code, Text, Video
+
+video = Video(duration=10, aspect="9:16")
+
+title = video.add(Text("Memoized Fibonacci", 56, bold=True, at=(0.5, 0.15)))
+title.slide_in("down", start=0.2)
+
+code = video.add(Code.file("fib.py"), start=0.6)
+code.pop_in(start=0.6)
+code.highlight("4-7", start=6.2)
+```
+
+Positions are fractions of the frame, sizes are pixels on a 1080 px short edge, times are
+seconds. Elements: `Text`, `Code`, `Image`, `Shape.rect` / `Shape.circle` (filled and/or
+outlined), `Line` (with optional arrowhead, `draw_on()`), `Terminal` (a command is typed,
+then its output prints) and `Group` (move, scale and fade several elements as one).
+Animations: `fade_in`, `fade_out`, `move_to`, `move_by`, `scale_to`, `rotate_to`, `pop_in`,
+`slide_in`, `slide_out`, `type_on`, `draw_on`, `highlight` (dims, marks and zooms), or
+`animate(prop, to=..., ease=ease.spring())`; `stagger(items, "pop_in", every=0.15)` runs
+one animation over many elements. Long code scrolls with the reveal. Themes: `midnight`,
+`slate`, `daylight`, `contrast`. See `examples/scripts/` and `SPEC.md` §5.
+
+Scripts are ordinary Python and run on your computer (in a separate process with a 10 s
+limit). Only run scripts you trust.
+
+## Install
+
+**Windows app:** unzip `CodeMotion-<version>-windows-x64.zip` anywhere and run
+`CodeMotion.exe` (desktop app) or `codemotion-cli.exe` (command line). No Python, ffmpeg or
+fonts needed. Renders go to `Videos\CodeMotion` by default.
+
+**From source** (Windows, macOS, Linux; see `docs/platforms.md`):
+
+```
+# prerequisites: uv (https://docs.astral.sh/uv/)
+uv sync
+uv run codemotion app                       # desktop app, or: uv run codemotion app video.py
+```
+
+## Desktop app
+
+Write the script on the left; the preview on the right updates 0.6 s after you stop typing
+(or press **Ctrl+Enter**). Drag the scrubber to see any moment. Errors appear under
+**Problems** and mark the line in the editor; click one to jump to it. **Quick preview**
+(Ctrl+Shift+Enter) renders a fast 540p video and plays it; **Render** (Ctrl+R) writes the
+full-quality MP4 to the output folder (File → Choose output folder…), with progress and
+Cancel, and lists it under **Renders**. File → Open example has the bundled examples;
+opening or dropping a plain code file asks for its code-card settings.
+
+## Command line
+
+```
+uv run codemotion new video.py                         # starter script
+uv run codemotion render video.py --preview            # fast 540p / 15 fps
+uv run codemotion render examples/scripts/code_explainer.py -o explainer.mp4
+uv run codemotion plan examples/scripts/why_python.py  # elements, timings, warnings
+uv run codemotion still examples/scripts/title_card.py --t 3 -o title.png
+uv run codemotion bench                                # speed and memory vs. targets
+```
+
+A `.py` file that doesn't import `codemotion` is shown as a code card instead (the original
+code-showcase video), e.g. `uv run codemotion render examples/fib.py --duration 8`, with
+`--aspect`, `--fps`, `--style typewriter|line_cascade|fade_in`, `--theme`, `--outro`,
+`--filename`. Without `-o`, videos go to `./output/` with a JSON file of the settings used.
+`--gif` and `--webm` also write a GIF (540p, 15 fps) and a WebM next to the MP4 (desktop:
+Video → Also export GIF / WebM).
+
+No system ffmpeg or fonts are required: JetBrains Mono and Inter are bundled (SIL OFL,
+licenses in `src/codemotion/assets/fonts/`).
+
+## Speed
+
+Renders use several processes when the video is big enough to benefit (up to 4; `--workers N`
+overrides, `--workers 1` renders in one process; frames are identical either way).
+`codemotion bench` measures the performance targets on your computer. On a 12-thread
+Windows laptop:
+
+| Measurement | Result | Target |
+|-------------|--------|--------|
+| Script run + plan | 0.36 s | < 1 s |
+| Preview still (while scrubbing) | 15 ms | < 300 ms |
+| Quick preview, 12 s (540p, 15 fps) | 2.0 s | < 5 s |
+| Full render, 12 s (1080×1920, 30 fps) | 9.2 s | < 30 s |
+| Peak memory (app + render workers) | 411 MB | < 800 MB |
+
+## Development
+
+```
+uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
+uv run pytest --update-golden          # rewrite golden frames after an intended visual change
+uv run python packaging/build.py       # Windows app folder + zip, with smoke tests
+uv run python packaging/readme_media.py  # the GIFs above
+```
+
+The test suite runs with network sockets disabled (`pytest-socket`).

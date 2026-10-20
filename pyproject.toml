@@ -1,0 +1,60 @@
+[project]
+name = "codemotion"
+version = "0.5.0"
+description = "Turn a Python video script into a short, polished motion-graphic video. Desktop app and CLI, fully offline."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "imageio-ffmpeg>=0.5",
+    "numpy>=1.26",
+    "pydantic>=2.7",
+    "pygments>=2.18",
+    "pyside6>=6.7",
+    "rich>=13.7",
+    "skia-python>=87.6",
+    "typer>=0.12",
+]
+
+[project.scripts]
+codemotion = "codemotion.cli:app"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pyinstaller>=6.10",
+    "pytest>=8.2",
+    "pytest-qt>=4.4",
+    "pytest-socket>=0.7",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["examples", "tests/fixtures", "motion_graphic_frame_plan.py"]  # user file
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "N"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/codemotion/desktop/*" = ["N802"]  # Qt method overrides are camelCase
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["skia", "skia.*", "pygments", "pygments.*", "imageio_ffmpeg", "imageio_ffmpeg.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--disable-socket --allow-unix-socket"
+qt_api = "pyside6"

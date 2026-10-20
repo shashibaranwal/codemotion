@@ -1,0 +1,46 @@
+name = "Daylight"
+
+[background]
+gradient = ["#F5F1E8", "#E4EAF5"]
+blobs = ["#FFC27A", "#8EB0FF"]
+
+[card]
+fill = "#FFFFFF"
+border = "#1F243014"
+shadow = "#1A224038"
+
+[chrome]
+dots = ["#FF5F57", "#FEBC2E", "#28C840"]
+tab_text = "#5F6878"
+
+[text]
+default = "#1F2430"
+gutter = "#8A93A3"
+cursor = "#1F2430"
+
+[accent]
+color = "#3559D4"
+
+# Keys are Pygments token types; lookup falls back to the parent type, then text.default.
+[tokens]
+Keyword = "#C4212D"
+"Keyword.Constant" = "#0550AE"
+"Name.Function" = "#7442D0"
+"Name.Class" = "#8A3500"
+"Name.Builtin" = "#0550AE"
+"Name.Builtin.Pseudo" = "#C4212D"
+"Name.Decorator" = "#8A3500"
+String = "#0A3069"
+"String.Doc" = "#57606A"
+"String.Interpol" = "#0550AE"
+"String.Escape" = "#0550AE"
+Number = "#0550AE"
+Comment = "#66707C"
+Operator = "#C4212D"
+"Operator.Word" = "#C4212D"
+Punctuation = "#24292F"
+
+[terminal]
+fill = "#1F2430"
+prompt = "#8EB0FF"
+text = "#E6E9F2"
