@@ -227,3 +227,30 @@ v1 is in `docs/SPEC-v1-code-showcase.md`.
   imaging library was added.
 - **Not done:** macOS/Linux packages (notes in `docs/platforms.md`); code signing (Windows
   SmartScreen will warn on first run of an unsigned download).
+
+## Sound effects (2026-10-20)
+
+Requested after M6 (the frame plans called for whooshes and a chime). Audio had been out of
+scope in the spec; this adds sound effects only, not music tools or audio editing.
+
+- **API:** `video.sound(sound, at=0, volume=1)`; cues live in `SceneDoc.sounds` (up to
+  100). `sound` is a built-in name or a file next to the script (resolved to an absolute
+  path by the API, like images; checked again when the scene is prepared).
+- **Built-in sounds are synthesized** with numpy (`render/audio.py`): whoosh (noise
+  through a moving band-pass, swelling, panning left to right), chime (two decaying bell
+  partials, E6 then B6), pop (falling sine blip), click (filtered noise tick), riser.
+  Rejected: bundling sample files (licensing, size) or downloading them (offline rule).
+  Each cue's noise is seeded from the cue, so renders stay deterministic.
+- **Files** (WAV/MP3/OGG/FLAC/M4A/AAC/Opus, up to 20 MB) are decoded by the bundled ffmpeg
+  to 48 kHz stereo float when rendering, not when planning, so typing in the desktop app
+  stays fast.
+- **Mixing:** cues are summed into one stereo track exactly as long as the video; if the
+  peak exceeds about -1 dBFS the mix is soft-limited (tanh) instead of clipping. Built-in
+  sounds peak at -6 dBFS before the cue's volume.
+- **Encoding:** the track goes to a temporary WAV beside the output and is muxed as AAC
+  192 kb/s into the MP4 (`-map 0:v -map 1:a`), then deleted. WebM exports carry it as Opus
+  128 kb/s; GIFs drop it. Renders without sounds are unchanged (no audio stream).
+- **Desktop:** the player has an audio output, so quick previews and renders play with
+  sound; sound cues appear in the Elements list. Stills and scrubbing are silent.
+- **Seeds:** adding the `sounds` field didn't change any video's grain, because the seed
+  ignores default values (M5).

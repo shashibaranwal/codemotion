@@ -39,7 +39,16 @@ def ffmpeg_exe() -> str:
         ) from None
 
 
-def mp4_command(exe: str, width: int, height: int, fps: int, path: Path) -> list[str]:
+def mp4_command(
+    exe: str, width: int, height: int, fps: int, path: Path, audio: Path | None = None
+) -> list[str]:
+    """Raw RGBA frames on stdin -> H.264 MP4; ``audio`` (a WAV as long as the video) is
+    muxed in as AAC."""
+    if audio is None:
+        sound = ["-an"]
+    else:
+        sound = ["-i", str(audio), "-map", "0:v", "-map", "1:a",
+                 "-c:a", "aac", "-b:a", config.AUDIO_AAC_BITRATE]  # fmt: skip
     return [
         exe,
         "-y",
@@ -56,7 +65,7 @@ def mp4_command(exe: str, width: int, height: int, fps: int, path: Path) -> list
         str(fps),
         "-i",
         "-",
-        "-an",
+        *sound,
         "-c:v",
         "libx264",
         "-preset",
@@ -80,8 +89,11 @@ def temp_path_for(path: Path) -> Path:
 class FFmpegEncoder:
     """Context manager: ``write()`` frames, then ``finish()``; any exception aborts."""
 
-    def __init__(self, path: Path, width: int, height: int, fps: int) -> None:
+    def __init__(
+        self, path: Path, width: int, height: int, fps: int, audio: Path | None = None
+    ) -> None:
         self.path = path
+        self.audio = audio
         self.temp = temp_path_for(path)
         self.width = width
         self.height = height
@@ -96,7 +108,7 @@ class FFmpegEncoder:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
             self._proc = subprocess.Popen(
-                mp4_command(ffmpeg_exe(), self.width, self.height, self.fps, self.temp),
+                mp4_command(ffmpeg_exe(), self.width, self.height, self.fps, self.temp, self.audio),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -173,7 +185,7 @@ def export_command(exe: str, source: Path, target: Path, fmt: ExportFormat,
                    gif_short_edge: int = config.GIF_SHORT_EDGE) -> list[str]:  # fmt: skip
     """ffmpeg arguments converting the MP4 ``source`` to ``target`` (GIF or WebM)."""
     head = [exe, "-y", "-hide_banner", "-loglevel", "error", "-nostats",
-            "-progress", "pipe:1", "-i", str(source), "-an"]  # fmt: skip
+            "-progress", "pipe:1", "-i", str(source)]  # fmt: skip
     if fmt == "gif":
         width, height = size
         ratio = gif_short_edge / min(width, height)
@@ -183,9 +195,11 @@ def export_command(exe: str, source: Path, target: Path, fmt: ExportFormat,
             "[a]palettegen=stats_mode=diff[p];"
             "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
         )
-        return [*head, "-filter_complex", graph, "-loop", "0", "-f", "gif", str(target)]
+        # GIFs are silent: drop any audio.
+        return [*head, "-an", "-filter_complex", graph, "-loop", "0", "-f", "gif", str(target)]
     return [*head, "-c:v", "libvpx-vp9", "-crf", str(config.WEBM_CRF), "-b:v", "0",
             "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-pix_fmt", "yuv420p",
+            "-c:a", "libopus", "-b:a", config.AUDIO_OPUS_BITRATE,  # if the MP4 has sound
             "-f", "webm", str(target)]  # fmt: skip
 
 

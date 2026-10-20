@@ -56,17 +56,22 @@ def smoke_test() -> None:
                 raise SystemExit(f"FAILED: render did not write {name}")
         check("render a code file", [str(cli), "render", "examples/fib.py", "--duration", "4",
                                      "--preview", "-o", str(out / "fib.mp4")])  # fmt: skip
-        # A user script may import any standard-library module (and numpy, which ships).
+        # A user script may import any standard-library module (and numpy, which ships),
+        # and play sounds (synthesized, then muxed by ffmpeg).
         script = out / "imports.py"
         script.write_text(
             "import csv, datetime, json, math, random, statistics, textwrap, itertools\n"
             "import numpy\n"
             "from codemotion import Text, Video\n"
             "video = Video(duration=3)\n"
-            "video.add(Text(str(statistics.mean([1, 2, 3]))))\n",
+            "video.add(Text(str(statistics.mean([1, 2, 3]))))\n"
+            "video.sound('whoosh', at=0.5)\n",
             encoding="utf-8",
         )
-        check("script imports", [str(cli), "plan", str(script)])
+        check("script imports + sound", [str(cli), "render", str(script), "--preview",
+                                         "-o", str(out / "imports.mp4")])  # fmt: skip
+        if not (out / "imports.mp4").is_file():
+            raise SystemExit("FAILED: the script with a sound did not render")
         report = out / "selftest.txt"
         check("desktop self-test", [str(gui), "--self-test", str(report)])
         print("  " + report.read_text("utf-8").strip().replace("\n", "\n  "))

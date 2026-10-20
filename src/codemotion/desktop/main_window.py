@@ -54,7 +54,7 @@ from codemotion.desktop.workers import (
     still_image,
 )
 from codemotion.errors import UserFacingError
-from codemotion.models import ElementPlan
+from codemotion.models import ElementPlan, SoundPlan
 from codemotion.render.encoder import ExportFormat
 from codemotion.render.renderer import Progress, default_output
 from codemotion.script.runner import ScriptRunError
@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
         self.editor.set_error_line(None)
         self._set_problems([Problem("warning", w) for w in plan.warnings])
         self.output_view.setPlainText(result.loaded.output)
-        self._fill_elements(plan.elements)
+        self._fill_elements(plan.elements, plan.sounds)
         self.preview.set_duration(plan.duration)
         doc = result.loaded.doc
         if first:  # open on the finished scene rather than the black first frame
@@ -607,7 +607,10 @@ class MainWindow(QMainWindow):
         if isinstance(line, int):
             self.editor.go_to_line(line)
 
-    def _fill_elements(self, elements: list[ElementPlan]) -> None:
+    def _fill_elements(
+        self, elements: list[ElementPlan], sounds: list[SoundPlan] | None = None
+    ) -> None:
+        sounds = sounds or []
         self.element_tree.clear()
         items: dict[str, QTreeWidgetItem] = {}
         for element in elements:
@@ -620,6 +623,10 @@ class MainWindow(QMainWindow):
             else:
                 self.element_tree.addTopLevelItem(item)
             items[element.id] = item
+        for cue in sounds:
+            item = QTreeWidgetItem([cue.name, "sound", f"{cue.at:g} s", f"volume {cue.volume:g}"])
+            item.setData(0, _LINE_ROLE, cue.at)
+            self.element_tree.addTopLevelItem(item)
         self.element_tree.setRootIsDecorated(any(e.parent for e in elements))
         self.element_tree.expandAll()
         for column in range(3):

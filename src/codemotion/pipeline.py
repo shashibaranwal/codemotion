@@ -32,6 +32,7 @@ from codemotion.models import (
     Plan,
     RenderRequest,
     ScenePlan,
+    SoundPlan,
 )
 from codemotion.render.canvas import decode_image
 from codemotion.script.doc import (
@@ -236,6 +237,13 @@ def prepare_scene(doc: SceneDoc, preview: bool = False) -> PreparedScene:
                 element, doc.aspect, doc.duration, preview
             )
             warnings += notes
+    for cue in doc.sounds:
+        if not cue.is_preset and not Path(cue.sound).is_file():
+            raise UserFacingError(f"Sound file not found: {cue.sound}", "sound")
+    skipped = [Path(c.sound).name for c in doc.sounds if c.at >= doc.duration]
+    if skipped:
+        names = ", ".join(skipped)
+        warnings.append(f"Sounds that start after the video ends are skipped: {names}.")
     for element in every:
         if element.start >= doc.duration:
             warnings.append(f"'{element.id}' starts after the video ends, so it never shows.")
@@ -292,7 +300,9 @@ def scene_plan(prepared: PreparedScene, extra_warnings: list[str] | None = None)
 
     add(doc.elements, None)
     warnings = list(dict.fromkeys([*(extra_warnings or []), *prepared.warnings]))
+    sounds = [SoundPlan(name=Path(c.sound).name, at=c.at, volume=c.volume) for c in doc.sounds]
     return ScenePlan(
+        sounds=sounds,
         duration=doc.duration,
         fps=prepared.fps,
         total_frames=prepared.total_frames,

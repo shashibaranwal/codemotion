@@ -248,6 +248,21 @@ def walk(elements: list[AnyElement]) -> Iterator[AnyElement]:
             yield from walk(element.children)
 
 
+SOUND_PRESETS = ("whoosh", "chime", "pop", "click", "riser")
+
+
+class SoundCue(_Model):
+    """A sound effect starting at ``at`` seconds: a built-in preset or an audio file."""
+
+    sound: str  # a preset name, or an absolute path to an audio file
+    at: float = Field(0.0, ge=0)
+    volume: float = Field(1.0, ge=0, le=4)
+
+    @property
+    def is_preset(self) -> bool:
+        return self.sound in SOUND_PRESETS
+
+
 class SceneDoc(_Model):
     duration: float = Field(
         ge=config.DURATION_MIN, le=config.DURATION_MAX, multiple_of=config.DURATION_STEP
@@ -259,6 +274,7 @@ class SceneDoc(_Model):
     fade_in: float = Field(0.4, ge=0, le=3)  # backdrop fades in from black
     fade_out: float = Field(0.0, ge=0, le=3)  # whole frame fades to black at the end
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
+    sounds: list[SoundCue] = Field(default_factory=list, max_length=config.MAX_SOUNDS)
 
     @field_validator("background")
     @classmethod

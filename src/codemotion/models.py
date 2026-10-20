@@ -140,6 +140,14 @@ class ElementPlan(BaseModel):
     parent: str | None = None  # the group it belongs to
 
 
+class SoundPlan(BaseModel):
+    """A sound cue: a built-in sound's name or the audio file's name."""
+
+    name: str
+    at: float
+    volume: float
+
+
 class ScenePlan(BaseModel):
     duration: float
     fps: int
@@ -148,3 +156,4 @@ class ScenePlan(BaseModel):
     height: int
     elements: list[ElementPlan]
     warnings: list[str]
+    sounds: list[SoundPlan] = []

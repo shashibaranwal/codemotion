@@ -500,3 +500,18 @@ def test_editor_highlights_the_new_api_names(qtbot: QtBot) -> None:
     colors = _formats(editor.document(), 0)
     api = config.EDITOR_COLORS["definition"].lower()
     assert colors[0] == colors[6] == colors[18] == api
+
+
+def test_window_lists_sound_cues(window: MainWindow, qtbot: QtBot) -> None:
+    text = (
+        "from codemotion import Text, Video\n"
+        "video = Video(duration=3)\n"
+        "video.add(Text('hi'))\n"
+        "video.sound('whoosh', at=1.5)\n"
+    )
+    set_script(qtbot, window, text)
+    rows = [
+        window.element_tree.topLevelItem(i) for i in range(window.element_tree.topLevelItemCount())
+    ]
+    sound = [row for row in rows if row.text(1) == "sound"]
+    assert len(sound) == 1 and sound[0].text(0) == "whoosh" and sound[0].text(2) == "1.5 s"

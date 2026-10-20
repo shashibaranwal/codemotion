@@ -607,6 +607,7 @@ class Video:
         self.duration = float(duration)
         self.aspect = aspect
         self._elements: list[Element] = []
+        self._sounds: list[dict[str, Any]] = []
         _registry.append(self)
 
     def add(self, element: E, start: float = 0.0, end: float | None = None) -> E:
@@ -614,6 +615,34 @@ class Video:
         _attach(element, start, end, self.duration)
         self._elements.append(element)
         return element
+
+    def sound(self, sound: str, at: float = 0.0, volume: float = 1.0) -> Video:
+        """Play a sound effect at ``at`` seconds.
+
+        ``sound`` is a built-in effect (``"whoosh"``, ``"chime"``, ``"pop"``, ``"click"``,
+        ``"riser"``) or an audio file next to the script (WAV, MP3, OGG, FLAC, M4A).
+        ``volume`` 1 is the normal level; 0.5 is half as loud.
+        """
+        name = str(sound)
+        if name not in d.SOUND_PRESETS:
+            file = Path(name).resolve()
+            if file.suffix.lower() not in config.SOUND_FILE_SUFFIXES:
+                presets = ", ".join(d.SOUND_PRESETS)
+                raise ScriptError(
+                    f"sound: '{name}' is neither a built-in sound ({presets}) "
+                    "nor an audio file (WAV, MP3, OGG, FLAC, M4A)"
+                )
+            if not file.is_file():
+                raise ScriptError(f"sound: '{name}' not found next to the script")
+            if file.stat().st_size > config.SOUND_FILE_MAX_BYTES:
+                raise ScriptError(f"sound: '{name}' is larger than 20 MB")
+            name = str(file)
+        cue = {"sound": name, "at": _number(at, "at"), "volume": _number(volume, "volume")}
+        _check(d.SoundCue, cue, "sound")
+        if len(self._sounds) >= config.MAX_SOUNDS:
+            raise ScriptError(f"a video can have at most {config.MAX_SOUNDS} sounds")
+        self._sounds.append(cue)
+        return self
 
     def to_doc(self) -> d.SceneDoc:
         counts: dict[str, int] = {}
@@ -628,7 +657,7 @@ class Video:
                 result.append(data)
             return result
 
-        doc = {**self._settings, "elements": docs(self._elements)}
+        doc = {**self._settings, "elements": docs(self._elements), "sounds": list(self._sounds)}
         result = _check(d.SceneDoc, doc, "Video")
         assert isinstance(result, d.SceneDoc)
         return result

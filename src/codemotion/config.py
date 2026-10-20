@@ -199,6 +199,18 @@ HOLD_SHRUNK_SECONDS: Final = 0.6
 TYPEWRITER_MAX_CPS: Final = 45.0  # readability cap
 TYPEWRITER_MIN_CPS: Final = 15.0  # never type slower; spare time goes to the hold
 
+# --------------------------------------------------------------------------- sound effects
+
+AUDIO_SAMPLE_RATE: Final = 48_000
+AUDIO_CHANNELS: Final = 2
+AUDIO_AAC_BITRATE: Final = "192k"
+AUDIO_OPUS_BITRATE: Final = "128k"
+AUDIO_HEADROOM: Final = 0.89  # mix peak above this is soft-limited (about -1 dBFS)
+SOUND_PRESET_GAIN: Final = 0.5  # built-in sounds peak at -6 dBFS before the cue's volume
+MAX_SOUNDS: Final = 100  # cues per video
+SOUND_FILE_MAX_BYTES: Final = 20 * 1024 * 1024
+SOUND_FILE_SUFFIXES: Final = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".opus")
+
 # --------------------------------------------------------------------------- encoder (6.7)
 
 # Multiprocess rendering (render/parallel.py)

@@ -255,6 +255,11 @@ def plan(
         name = "  " * depth[e.id] + e.id  # group members are indented
         table.add_row(name, e.type, f"{e.start:g}-{e.end:g}", str(e.animations), notes)
     out.print(table)
+    if result.sounds:
+        sounds = Table("sound", "at (s)", "volume")
+        for cue in result.sounds:
+            sounds.add_row(escape(cue.name), f"{cue.at:g}", f"{cue.volume:g}")
+        out.print(sounds)
     _warn(result.warnings)
 
 

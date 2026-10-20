@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent
-from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -65,6 +65,7 @@ class PreviewPanel(QWidget):
         self.video: Path | None = None
         self._player: QMediaPlayer | None = None  # created on first play
         self._video_widget: QVideoWidget | None = None
+        self._audio: QAudioOutput | None = None
 
         self.frame = FrameView()
         self.stack = QStackedWidget()
@@ -138,6 +139,8 @@ class PreviewPanel(QWidget):
             self.stack.addWidget(self._video_widget)
             player = QMediaPlayer(self)
             player.setVideoOutput(self._video_widget)
+            self._audio = QAudioOutput(self)  # renders with sound effects play them
+            player.setAudioOutput(self._audio)
             player.durationChanged.connect(self._on_video_duration)
             player.positionChanged.connect(self._on_video_position)
             player.playbackStateChanged.connect(self._on_playback_state)

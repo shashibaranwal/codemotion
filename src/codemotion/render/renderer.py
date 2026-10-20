@@ -207,9 +207,15 @@ def render_video(
     ``formats`` also converts the MP4 to GIF and/or WebM next to it. Cancelling removes
     everything this render wrote.
     """
-    with FFmpegEncoder(output, prepared.width, prepared.height, prepared.fps) as encoder:
-        render_frames(prepared, encoder.write, progress, cancel, workers, worker_memory)
-        video = encoder.finish()
+    soundtrack = _soundtrack(prepared, output)
+    try:
+        with FFmpegEncoder(output, prepared.width, prepared.height, prepared.fps,
+                           soundtrack) as encoder:  # fmt: skip
+            render_frames(prepared, encoder.write, progress, cancel, workers, worker_memory)
+            video = encoder.finish()
+    finally:
+        if soundtrack is not None:
+            soundtrack.unlink(missing_ok=True)
     exports: list[Path] = []
     try:
         for fmt in dict.fromkeys(formats):
@@ -223,6 +229,21 @@ def render_video(
     except OSError as exc:
         raise UserFacingError(f"Could not write the settings file: {exc.strerror}.") from None
     return video
+
+
+def _soundtrack(prepared: PreparedScene, output: Path) -> Path | None:
+    """Mix the scene's sound cues into a temporary WAV next to ``output`` (None: silent)."""
+    if not prepared.doc.sounds:
+        return None
+    from codemotion.render.audio import mix, write_wav
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    path = output.with_name(f".{output.stem}.audio.wav")
+    try:
+        return write_wav(path, mix(prepared.doc))
+    except OSError as exc:
+        path.unlink(missing_ok=True)
+        raise UserFacingError(f"Could not write the soundtrack: {exc.strerror}.") from None
 
 
 def _export(

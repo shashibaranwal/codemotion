@@ -214,3 +214,8 @@ for piece, (sx, sy) in pieces:
     # Each symbol starts out at its corner of the screen and settles into the icon.
     piece.animate("ox", from_=sx * 200, to=0, start=9.0, length=0.8, ease=SMOOTH)
     piece.animate("oy", from_=sy * 160, to=0, start=9.0, length=0.8, ease=SMOOTH)
+
+# -- sound: the plan's "soft airy whoosh" at every scene change -------------------------------
+
+for at in (2.0, 4.0, 5.5, 7.0, 9.0):
+    video.sound("whoosh", at=at, volume=0.55)
