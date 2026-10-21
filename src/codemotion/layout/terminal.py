@@ -35,11 +35,27 @@ class TerminalLayout:
     type_end: float  # the command is fully typed
     line_times: tuple[float, ...]  # when each output line appears
     end: float  # the final prompt appears (everything shown)
+    # Rows, like a real terminal: lines wider than ``columns`` wrap, and once more rows
+    # have printed than the panel holds (``visible_rows``) the oldest scroll off the top.
+    columns: int = 0
+    command_rows: int = 0  # rows the prompt and command take (0 without a command)
+    output_rows: tuple[tuple[str, float], ...] = ()  # (text, when it appears)
+    visible_rows: int = 0
 
     @property
     def line_count(self) -> int:
-        """Lines on screen once finished: command, output, final prompt."""
-        return len(self.output) + (2 if self.command is not None else 0)
+        """Rows once finished: command, output, final prompt."""
+        return self.command_rows + len(self.output_rows) + (1 if self.command is not None else 0)
+
+    def rows_at(self, t: float) -> int:
+        """Rows printed by time ``t`` (the command's rows count from the start)."""
+        printed = sum(1 for _, at in self.output_rows if at <= t)
+        final = 1 if self.command is not None and t >= self.end else 0
+        return self.command_rows + printed + final
+
+    def first_row(self, t: float) -> int:
+        """Rows scrolled off the top at time ``t``."""
+        return max(0, self.rows_at(t) - self.visible_rows)
 
     def typed(self, t: float) -> int:
         """Characters of the command shown at time ``t``."""
@@ -72,19 +88,9 @@ def layout_terminal(
     warnings: list[str] = []
 
     output = _clean(element.output)
-    if len(output) > config.TERMINAL_MAX_LINES:
-        raise UserFacingError(
-            f"{label} has {len(output)} output lines; the limit is {config.TERMINAL_MAX_LINES}.",
-            "terminal",
-        )
     replaced = 0
     shown: list[str] = []
     for line in output:
-        if len(line) > config.TERMINAL_MAX_LINE:
-            raise UserFacingError(
-                f"{label}: output lines can be at most {config.TERMINAL_MAX_LINE} characters.",
-                "terminal",
-            )
         text, count = replace_missing_glyphs(line, FontRole.mono)
         shown.append(text)
         replaced += count
@@ -101,27 +107,33 @@ def layout_terminal(
     rows = list(shown)
     if command is not None:
         rows.append(f"{element.prompt} {command} ")  # room for the cursor
-    columns = max((len(row) for row in rows), default=0)
+    widest = max((len(row) for row in rows), default=0)
     font = element.size * unit
-    if columns:
-        fit = (width - 2 * padding) / (columns * mono.advance)
-        if fit < font * config.TERMINAL_MIN_FONT_FACTOR:
-            widest = max(range(len(rows)), key=lambda i: len(rows[i]))
-            what = "the command" if command is not None and widest == len(rows) - 1 else (
-                f"output line {widest + 1}"
-            )  # fmt: skip
-            raise UserFacingError(
-                f"{label}: {what} is too wide; shorten it or make the terminal wider.",
-                "terminal",
-            )
+    inner_w = width - 2 * padding
+    columns = widest  # everything fits on its own row
+    if widest:
+        fit = inner_w / (widest * mono.advance)
         if fit < font:
-            warnings.append(f"{label}: the text was made smaller to fit the width.")
-            font = fit
+            # Shrink to fit, down to TERMINAL_MIN_FONT_FACTOR; wider lines wrap.
+            min_font = font * config.TERMINAL_MIN_FONT_FACTOR
+            if fit >= min_font:
+                font = fit
+                warnings.append(f"{label}: the text was made smaller to fit the width.")
+            else:
+                font = min_font
+                columns = math.floor(inner_w / (mono.advance * font))
+                if columns < config.TERMINAL_MIN_COLUMNS:
+                    raise UserFacingError(
+                        f"{label} is too narrow; make the terminal wider.", "terminal"
+                    )
+                warnings.append(f"{label}: long lines wrap, as in a real terminal.")
 
     line_h = font * config.TERMINAL_LINE_HEIGHT_FACTOR
     title_h = config.TERMINAL_TITLE_HEIGHT * unit
-    n_lines = len(shown) + (2 if command is not None else 0)
-    height = title_h + 2 * padding + max(1, n_lines) * line_h
+    command_rows = 0
+    if command is not None:
+        # The prompt, the command and room for the cursor after it, wrapped.
+        command_rows = (len(element.prompt) + 1 + len(command)) // columns + 1
 
     start = (
         element.reveal_start
@@ -138,6 +150,19 @@ def layout_terminal(
     visible_until = element.end if element.end is not None else duration
     if end > visible_until:
         warnings.append(f"{label} is still printing when it leaves the screen.")
+
+    output_rows = tuple(
+        (line[i : i + columns], at)
+        for line, at in zip(shown, line_times, strict=True)
+        for i in range(0, max(1, len(line)), columns)
+    )
+    total_rows = command_rows + len(output_rows) + (1 if command is not None else 0)
+    # The panel grows with its rows until it would be taller than the safe area.
+    room = safe_rect(aspect, preview).h - title_h - 2 * padding
+    visible_rows = max(1, min(total_rows, math.floor(room / line_h)))
+    if visible_rows < total_rows:
+        warnings.append(f"{label}: older lines scroll up as new ones print.")
+    height = title_h + 2 * padding + visible_rows * line_h
 
     return (
         TerminalLayout(
@@ -156,6 +181,10 @@ def layout_terminal(
             type_end=type_end,
             line_times=line_times,
             end=end,
+            columns=columns,
+            command_rows=command_rows,
+            output_rows=output_rows,
+            visible_rows=visible_rows,
         ),
         warnings,
     )

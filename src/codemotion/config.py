@@ -29,9 +29,9 @@ SANS_SEMIBOLD_FONT_FILE: Final = FONTS_DIR / "Inter-SemiBold.ttf"
 
 # --------------------------------------------------------------------------- input limits (2.2)
 
-MAX_LINES: Final = 60
-MAX_LINE_LENGTH: Final = 100
-MAX_TOTAL_CHARS: Final = 3_000
+# No cap on line count, line length or total size: long code scrolls and wide lines wrap
+# (see docs/decisions.md).
+WRAP_MIN_COLUMNS: Final = 20  # a code area narrower than this at the minimum font is refused
 TAB_SIZE: Final = 4
 MISSING_GLYPH_REPLACEMENT: Final = "□"  # □
 
@@ -44,11 +44,14 @@ DURATION_DEFAULT: Final = 8.0
 FPS_OPTIONS: Final = (30, 60)
 DEFAULT_THEME: Final = "midnight"
 DEFAULT_FILENAME: Final = "main.py"
-TITLE_MAX_LENGTH: Final = 60
-CAPTION_MAX_LENGTH: Final = 80
-OUTPUT_TEXT_MAX_LENGTH: Final = 600
 IMAGE_MAX_BYTES: Final = 5 * 1024 * 1024
 SCRIPT_TIMEOUT_SECONDS: Final = 10.0
+# Video programs (Pillow/OpenCV scripts that write their own video) render every frame
+# themselves, so they get much longer than video scripts.
+PROGRAM_TIMEOUT_SECONDS: Final = 30 * 60.0
+PROGRAM_OUTPUT_LIMIT: Final = 20_000  # characters of a program's output kept (the tail)
+PROGRAM_SCAN_DEPTH: Final = 3  # folder levels searched for the video a program wrote
+VIDEO_SUFFIXES: Final = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".gif")
 TYPEWRITER_DEFAULT_CPS: Final = 30.0  # script Code elements without reveal_length
 
 # --------------------------------------------------------------------------- aspects (F9, 5.1, 5.2)
@@ -180,9 +183,7 @@ TERMINAL_TYPE_CPS: Final = 25.0
 TERMINAL_LINE_INTERVAL: Final = 0.08  # seconds between printed output lines
 TERMINAL_START_DELAY: Final = 0.3  # after the element starts
 TERMINAL_OUTPUT_DELAY: Final = 0.35  # "Enter" -> first output line
-TERMINAL_MAX_LINES: Final = 30
-TERMINAL_MAX_LINE: Final = 100
-TERMINAL_MAX_CHARS: Final = 2_000
+TERMINAL_MIN_COLUMNS: Final = 16  # a terminal narrower than this at the smallest font is refused
 
 # Lines
 ARROW_LENGTH_FACTOR: Final = 4.0  # arrowhead length = line width x this (min 14 px)

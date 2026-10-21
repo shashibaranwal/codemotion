@@ -86,6 +86,17 @@ code-showcase video), e.g. `uv run codemotion render examples/fib.py --duration 
 `--gif` and `--webm` also write a GIF (540p, 15 fps) and a WebM next to the MP4 (desktop:
 Video → Also export GIF / WebM).
 
+## Video programs (Pillow / OpenCV)
+
+A script that draws its own frames and writes a video, with Pillow, OpenCV
+(`cv2.VideoWriter`), `imageio` or an animated GIF, is a *video program*. CodeMotion runs it
+like `python program.py`, shows what it prints, finds the video it wrote and saves it as an
+H.264 MP4 with the other renders: `uv run codemotion render my_animation.py`, or paste it
+into the desktop app and press **Run** (plays it) or **Render** (also saves it). Programs
+are never run while you type. A saved file runs in its own folder, so relative paths work.
+Progress comes from lines it prints like `Rendered 60/257 frames`. Programs can use
+Pillow, OpenCV, NumPy and the standard library; the limit is 30 minutes.
+
 No system ffmpeg or fonts are required: JetBrains Mono and Inter are bundled (SIL OFL,
 licenses in `src/codemotion/assets/fonts/`).
 

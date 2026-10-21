@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import IO, Literal
@@ -219,10 +220,25 @@ def export_video(
     """
     target = source.with_suffix(f".{fmt}")
     temp = temp_path_for(target)
+    command = export_command(ffmpeg_exe(), source, temp, fmt, size, gif_short_edge)
+    return _convert(command, temp, target, duration, f"{fmt.upper()} export", progress, cancelled)
+
+
+def _convert(
+    command: list[str],
+    temp: Path,
+    target: Path,
+    duration: float,
+    what: str,
+    progress: Callable[[float], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> Path:
+    """Run an ffmpeg ``command`` writing ``temp`` (with ``-progress pipe:1``), then move it
+    to ``target``. ``duration`` (seconds) turns ffmpeg's progress into a fraction."""
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
         proc = subprocess.Popen(
-            export_command(ffmpeg_exe(), source, temp, fmt, size, gif_short_edge),
+            command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -263,7 +279,7 @@ def export_video(
         temp.unlink(missing_ok=True)
         tail = [line for line in errors if line][-config.FFMPEG_STDERR_LINES :]
         detail = ("\n" + "\n".join(tail)) if tail else ""
-        raise UserFacingError(f"{fmt.upper()} export failed (ffmpeg exit code {code}).{detail}")
+        raise UserFacingError(f"{what} failed (ffmpeg exit code {code}).{detail}")
     try:
         os.replace(temp, target)
     except OSError as exc:
@@ -272,3 +288,53 @@ def export_video(
     if progress is not None:
         progress(1.0)
     return target
+
+
+# --------------------------------------------------------------------------- imported videos
+
+
+@dataclass(frozen=True)
+class VideoInfo:
+    width: int
+    height: int
+    fps: float
+    duration: float  # seconds
+
+
+def probe_video(path: Path) -> VideoInfo:
+    """Size, frame rate and length of the video at ``path``."""
+    import imageio_ffmpeg
+
+    try:
+        reader = imageio_ffmpeg.read_frames(str(path))
+        meta = next(reader)
+        reader.close()
+        width, height = meta["size"]
+        return VideoInfo(int(width), int(height), float(meta["fps"]), float(meta["duration"]))
+    except (OSError, RuntimeError, StopIteration, KeyError, TypeError, ValueError):
+        raise UserFacingError(f"{path.name} isn't a video ffmpeg can read.") from None
+
+
+def import_command(exe: str, source: Path, target: Path) -> list[str]:
+    """ffmpeg arguments re-encoding any video ``source`` as a CodeMotion-style MP4 (H.264,
+    even size, yuv420p, AAC sound if it has any) so every player can show it."""
+    return [exe, "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+            "-progress", "pipe:1", "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v", "libx264", "-preset", config.X264_PRESET, "-crf", str(config.X264_CRF),
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", config.AUDIO_AAC_BITRATE,
+            "-movflags", "+faststart", "-f", "mp4", str(target)]  # fmt: skip
+
+
+def import_video(
+    source: Path,
+    target: Path,
+    progress: Callable[[float], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> VideoInfo:
+    """Re-encode the video a program wrote (any format ffmpeg reads) to the MP4 ``target``."""
+    duration = probe_video(source).duration
+    temp = temp_path_for(target)
+    command = import_command(ffmpeg_exe(), source, temp)
+    _convert(command, temp, target, duration, "Importing the video", progress, cancelled)
+    return probe_video(target)

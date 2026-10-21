@@ -9,7 +9,14 @@ from codemotion import config
 from codemotion.analysis.normalize import normalize
 from codemotion.analysis.tokenize import tokenize
 from codemotion.errors import UserFacingError
-from codemotion.layout.layout import MISSING_GLYPH_WARNING, SCROLL_WARNING, Layout, compute_layout
+from codemotion.geometry import Rect
+from codemotion.layout.layout import (
+    MISSING_GLYPH_WARNING,
+    SCROLL_WARNING,
+    WRAP_WARNING,
+    Layout,
+    compute_layout,
+)
 from codemotion.models import Aspect
 
 
@@ -72,18 +79,39 @@ def test_fitting_code_does_not_scroll() -> None:
     assert lay.content_height == pytest.approx(lay.code_rect.h)
 
 
-def test_too_wide_for_portrait_is_rejected_with_line_number() -> None:
-    code = "a = 1\n" + "b = '" + "x" * 70 + "'"
-    with pytest.raises(
-        UserFacingError, match="Line 2 is too wide for this format; shorten it or use 16:9"
-    ):
-        layout_for(code, Aspect.portrait)
-    assert layout_for(code, Aspect.landscape).font_size >= config.ASPECT_PRESETS["16:9"].min_font
+def test_too_wide_line_wraps_at_the_minimum_font() -> None:
+    code = "a = 1\n" + "result = compute(" + ", ".join(f"arg{i}" for i in range(10)) + ")\nz = 2"
+    lay = layout_for(code, Aspect.portrait)
+    assert WRAP_WARNING in lay.warnings
+    assert lay.font_size == pytest.approx(config.ASPECT_PRESETS["9:16"].min_font)
+    assert lay.line_count == 3 and len(lay.lines) > 3
+    first, last = lay.rows_of(2)
+    assert first == 1 and last > first and lay.rows_of(3) == (last + 1, last + 1)
+    rows = lay.lines[first : last + 1]
+    assert [r.number for r in rows] == [2] * len(rows)
+    assert [r.continuation for r in rows] == [False] + [True] * (len(rows) - 1)
+    # Every row fits the card, breaks fall after ", " and continuation rows hang 4 deep.
+    for row in rows:
+        right = lay.column_x(row.runs[-1].column + len(row.runs[-1].text))
+        assert right <= lay.code_rect.right + 1e-6
+    assert all(r.text.startswith("    ") and not r.text.startswith("     ") for r in rows[1:])
+    assert all(r.text.rstrip().endswith(",") for r in rows[:-1])
+    assert "".join(r.text.strip() + " " for r in rows).strip() == code.split("\n")[1]
+    # 16:9 is wide enough for the same line.
+    assert WRAP_WARNING not in layout_for(code, Aspect.landscape).warnings
 
 
-def test_max_line_length_always_fits_landscape() -> None:
-    lay = layout_for("x" * config.MAX_LINE_LENGTH + "\n" + "y\n" * 59, Aspect.landscape)
-    assert lay.font_size >= config.ASPECT_PRESETS["16:9"].min_font
+def test_unbreakable_line_wraps_at_the_column_limit() -> None:
+    lay = layout_for("x" * 300, Aspect.portrait)
+    widths = [len(r.text) for r in lay.lines]
+    assert sum(len(r.text.strip()) for r in lay.lines) == 300
+    assert len(set(widths[1:-1])) <= 1 and widths[0] >= widths[1]
+
+
+def test_too_narrow_region_is_refused() -> None:
+    narrow = Rect(0, 0, 200, 600)
+    with pytest.raises(UserFacingError, match="too narrow"):
+        compute_layout(tokenize("x = 1"), Aspect.portrait, region=narrow)
 
 
 def test_preview_is_half_scale() -> None:
@@ -110,9 +138,8 @@ def test_glyph_positions_follow_monospace_grid() -> None:
 
 def test_gutter_widens_for_three_digit_line_counts() -> None:
     assert layout_for("x\n" * 9).gutter_digits == 2
-    # 100+ lines is beyond MAX_LINES, so exercise compute_layout directly.
-    lines = tokenize("\n".join(["x"] * 100))
-    assert compute_layout(lines, Aspect.landscape).gutter_digits == 3
+    assert layout_for("x\n" * 100, Aspect.landscape).gutter_digits == 3
+    assert layout_for("x\n" * 1_000, Aspect.landscape).gutter_digits == 4
 
 
 def test_missing_glyphs_warn_and_keep_one_cell_each() -> None:

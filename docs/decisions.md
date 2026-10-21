@@ -254,3 +254,105 @@ scope in the spec; this adds sound effects only, not music tools or audio editin
   sound; sound cues appear in the Elements list. Stills and scrubbing are silent.
 - **Seeds:** adding the `sounds` field didn't change any video's grain, because the seed
   ignores default values (M5).
+
+## No limit on lines of code (2026-10-21)
+
+Requested so that whole files (thousands of lines) can be shown. Overrides SPEC 2.2's
+60-line and 3,000-character limits; the 100-character line length stays, because the
+layout has to fit the widest line.
+
+- Code taller than its card already scrolls (M5 camera scroll), so nothing else changes
+  in the layout; the gutter widens to fit 4+ digit line numbers.
+- Drawing starts at the first line the scroll leaves in view, and highlight dimming is
+  worked out only for drawn lines, so a frame costs the same for 5,000 lines as for 50
+  (about 65 ms at 1920x1080). Preparing 5,000 lines takes under a second.
+- Videos are still at most 12 s long. Typing that much code would be faster than
+  `TYPEWRITER_MAX_CPS`, so long code falls back to the line cascade (existing rule) and
+  the camera scrolls quickly to follow it.
+
+## Long lines wrap (2026-10-21)
+
+Follows from removing the line-count limit: real files have lines over 100 characters, and
+portrait cards fit only about 56. Both the 100-character cap and the "too wide for this
+format" error are gone.
+
+- The font still shrinks to fit the widest line, down to the format's minimum. Lines that
+  don't fit even then wrap onto extra rows (soft wrap, like an editor), with a warning.
+  Rejected: shrinking the font further, which made phone-width cards unreadable.
+- Rows break after the last space, comma or opening bracket in the row's second half, else
+  at the column limit. Continuation rows hang one indent (4 columns) deeper than their
+  line and have no line number.
+- `Layout.lines` holds rows; each keeps its source line `number`, and `rows_of(n)` maps a
+  line to its rows. Highlights, highlight scroll and zoom use whole lines; reveals,
+  the cursor and camera scroll work per row. Lines that fit are laid out exactly as
+  before, so existing videos don't change.
+- A code area narrower than `WRAP_MIN_COLUMNS` (20) at the minimum font is refused.
+
+## No text or terminal size limits (2026-10-21)
+
+Requested along with unlimited code: text and terminal content have no character or line
+limits any more.
+
+- Removed: Text elements' 400 characters; the code-card title (60), caption (80) and
+  output text (600); the terminal's 30 output lines, 2,000 characters, 100-character
+  lines and 100-character command.
+- Kept: labels drawn in fixed chrome (file name and terminal title, 40 characters; prompt,
+  8), because longer ones run out of their title bar.
+- The terminal behaves like a real one. Text shrinks to fit the width down to
+  `TERMINAL_MIN_FONT_FACTOR`, then long lines (and a long command) hard-wrap at the column
+  limit. The panel grows with its rows up to the height of the safe area; after that the
+  oldest rows scroll off the top as new ones print. A terminal under
+  `TERMINAL_MIN_COLUMNS` (16) wide at the smallest font is refused. Terminals that fit
+  look exactly as before.
+
+## Video programs: Pillow/OpenCV scripts (2026-10-21)
+
+Requested: paste a script like `motion_graphic.py` (Pillow draws frames, OpenCV writes the
+MP4) into the desktop app and get its video. A third kind of source next to video scripts
+and code files. New dependencies, approved for this: `pillow` and `opencv-python-headless`
+(headless: the regular wheel bundles its own Qt, which clashes with PySide6). They are
+bundled into the packaged app only for programs; CodeMotion itself doesn't import them.
+
+- **Detection** (`script/program.py`, `source.source_kind`): not a video script, imports
+  PIL / cv2 / imageio / moviepy / skvideo / av, and calls a video writer (`VideoWriter`,
+  `get_writer`, `mimsave`, `write_videofile`, `save_all=`…). `--mode program` forces it.
+- **Running** works like `python program.py` in a child process (the packaged app runs it
+  with `codemotion-cli.exe --codemotion-run-program`, since it has no python.exe), with
+  stdout and stderr merged and streamed, a 30-minute limit and Cancel (which ends the
+  process tree). A saved file runs in its own folder so relative paths work; edited text
+  runs from a temp copy with that folder as the working directory (and on PYTHONPATH).
+  Unsaved programs run in a temp folder.
+- **The video** is the newest video file created or changed in the working folder (3
+  levels deep, skipping hidden and venv folders). It is re-encoded to H.264/yuv420p/AAC
+  with even dimensions, because programs often write `mp4v`, which many players can't
+  play, then gets a sidecar so it is listed with the renders. Rejected: copying it as is.
+- **Progress** comes from what the program prints: the last "N/M" on a line ("Rendered
+  60/257 frames"). Otherwise the bar waits, then the import and exports report normally.
+- **Desktop:** programs are never auto-run (slow, and they write files); the Problems list
+  says so. Run plays the video from a temp folder; Render saves it to Renders (plus
+  GIF/WebM if chosen). A failure shows the traceback's last line and marks its line.
+  CLI: `render` runs programs; `plan` and `still` explain that they need `render`.
+
+## Truncated pastes and "Run as" (2026-10-21)
+
+Reported: a pasted Pillow script "stops at line 96" and came out as a code card. Diagnosis:
+the editor pasted everything it was given (2,000-line paste tests fine); the pasted text
+itself ended at line 96, inside a function, before the part that writes the video and
+calls `main()`. Detection then required a video-writer call, which is exactly the part a
+cut-off paste loses, so it silently fell back to a code card, and the desktop app had no
+way to override detection. Changes:
+
+- **Detection by import only:** importing PIL / cv2 / imageio / moviepy / skvideo / av
+  makes a video program. A writer call is no longer required (it is usually last, and
+  libraries write videos in too many ways to list).
+- **Cut-off check** (`program.incomplete`, run before a program starts and shown in
+  Problems when it is pasted): the text ends inside a statement (an unclosed bracket or
+  string, a block with no body), or it defines functions but never calls or references
+  any at top level (no `main()`, no `if __name__ == "__main__":`), so running it would do
+  nothing. The message names the last line. Other syntax errors are left to the run.
+- **Run as** (toolbar): Auto / Video script / Video program / Code card, reset to Auto
+  for each file. Auto's entry shows what it detected ("Auto: video program"). A code card
+  chosen by Auto says why in Problems and how to run the code instead.
+- **Paste bug:** text copied from a web page often comes with web links, and the editor
+  dropped such pastes entirely (it only meant to hand dropped *local files* to the
+  window). It now pastes the text unless there are local files.

@@ -216,16 +216,14 @@ class CodeBlock:
         self.spotlights = spotlights or []
         self.scroller = scroller or Scroller()
 
-    def _dimming(self, frame: int) -> tuple[dict[int, float], list[tuple[Spotlight, float]]]:
-        """Per-line opacity factors and the active spotlights with their amounts."""
-        factors: dict[int, float] = {}
-        active = [(s, a) for s in self.spotlights if (a := s.amount.at(frame)) > 0]
+    @staticmethod
+    def _dimming(number: int, active: list[tuple[Spotlight, float]]) -> float:
+        """Opacity factor for line ``number``: lines outside an active highlight dim."""
+        factor = 1.0
         for spot, amount in active:
-            dim = 1 - (1 - config.HIGHLIGHT_DIM_OPACITY) * amount
-            for line in self.layout.lines:
-                if line.number not in spot.lines:
-                    factors[line.number] = min(factors.get(line.number, 1.0), dim)
-        return factors, active
+            if number not in spot.lines:
+                factor = min(factor, 1 - (1 - config.HIGHLIGHT_DIM_OPACITY) * amount)
+        return factor
 
     def _draw_bars(
         self, canvas: Canvas, active: list[tuple[Spotlight, float]], scroll: float
@@ -235,8 +233,8 @@ class CodeBlock:
         bar_w = config.HIGHLIGHT_BAR_WIDTH * lay.unit
         for spot, amount in active:
             for first, last in contiguous_runs(spot.lines):
-                top = lay.lines[first - 1].top - scroll
-                bottom = lay.lines[last - 1].top + lay.line_height - scroll
+                top = lay.lines[lay.rows_of(first)[0]].top - scroll
+                bottom = lay.lines[lay.rows_of(last)[1]].top + lay.line_height - scroll
                 band = Rect(lay.card_rect.x, top, lay.card_rect.w, bottom - top)
                 fill = Paint(color=accent, opacity=config.HIGHLIGHT_FILL_OPACITY * amount)
                 canvas.rect(band, fill)
@@ -245,7 +243,7 @@ class CodeBlock:
     def draw(self, canvas: Canvas, frame: int, ctx: SceneContext) -> None:
         lay = self.layout
         size = lay.font_size
-        factors, active = self._dimming(frame) if self.spotlights else ({}, [])
+        active = [(s, a) for s in self.spotlights if (a := s.amount.at(frame)) > 0]
         scroll = self.scroller.offset(frame)
         if active:
             canvas.save()
@@ -255,7 +253,11 @@ class CodeBlock:
             canvas.restore()
         canvas.save()
         canvas.clip_rect(lay.code_rect)
-        for index, line in enumerate(lay.lines):
+        # Lines are evenly spaced, so start at the first one the scroll leaves in view
+        # instead of walking past thousands above it every frame.
+        first = max(0, int(scroll // lay.line_height))
+        for index in range(first, len(lay.lines)):
+            line = lay.lines[index]
             top = line.top - scroll
             if top >= lay.code_rect.bottom:
                 break
@@ -264,16 +266,17 @@ class CodeBlock:
             view = self.reveal.line_view(frame, index)
             if view is None or view.opacity <= 0:
                 continue
-            opacity = view.opacity * factors.get(line.number, 1.0)
+            opacity = view.opacity * self._dimming(line.number, active)
             baseline = line.baseline - scroll + view.dy
-            number = str(line.number)
-            x = lay.gutter_right - len(number) * lay.char_advance
-            canvas.text_blob(
-                canvas.make_text_blob(number, FontRole.mono, size),
-                x,
-                baseline,
-                Paint(color=self.theme.text.gutter, opacity=opacity),
-            )
+            if not line.continuation:  # wrapped rows share their line's number
+                number = str(line.number)
+                x = lay.gutter_right - len(number) * lay.char_advance
+                canvas.text_blob(
+                    canvas.make_text_blob(number, FontRole.mono, size),
+                    x,
+                    baseline,
+                    Paint(color=self.theme.text.gutter, opacity=opacity),
+                )
             if view.columns is not None:
                 canvas.save()
                 visible_w = lay.column_x(view.columns) - lay.code_x

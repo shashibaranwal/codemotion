@@ -72,6 +72,25 @@ def smoke_test() -> None:
                                          "-o", str(out / "imports.mp4")])  # fmt: skip
         if not (out / "imports.mp4").is_file():
             raise SystemExit("FAILED: the script with a sound did not render")
+        # A video program: Pillow draws frames, OpenCV writes them; CodeMotion imports it.
+        program = out / "program.py"
+        program.write_text(
+            "import cv2\n"
+            "import numpy as np\n"
+            "from PIL import Image, ImageDraw\n"
+            "writer = cv2.VideoWriter('clip.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 10, (64, 64))\n"
+            "for i in range(10):\n"
+            "    img = Image.new('RGB', (64, 64), 'white')\n"
+            "    ImageDraw.Draw(img).ellipse((i, i, i + 20, i + 20), fill='blue')\n"
+            "    writer.write(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))\n"
+            "    print(f'{i + 1}/10')\n"
+            "writer.release()\n",
+            encoding="utf-8",
+        )
+        check("video program (Pillow + OpenCV)", [str(cli), "render", str(program),
+                                                  "-o", str(out / "program.mp4")])  # fmt: skip
+        if not (out / "program.mp4").is_file():
+            raise SystemExit("FAILED: the video program's video was not imported")
         report = out / "selftest.txt"
         check("desktop self-test", [str(gui), "--self-test", str(report)])
         print("  " + report.read_text("utf-8").strip().replace("\n", "\n  "))

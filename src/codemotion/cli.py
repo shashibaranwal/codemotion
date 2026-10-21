@@ -1,8 +1,8 @@
 """Command-line interface.
 
-``SOURCE`` is either a video script (a .py file that imports codemotion) or a plain code
-file, which is shown as a code card (showcase mode). Detection is automatic; ``--script``
-or ``--code`` forces it.
+``SOURCE`` is a video script (a .py file that imports codemotion), a video program (a
+Pillow/OpenCV script that writes its own video, run by ``render``) or a plain code file,
+which is shown as a code card (showcase mode). Detection is automatic; ``--mode`` forces it.
 """
 
 from __future__ import annotations
@@ -25,8 +25,21 @@ from codemotion.errors import UserFacingError
 from codemotion.models import Aspect, ScenePlan, Style, parse_request
 from codemotion.pipeline import PreparedScene, prepare_scene, scene_plan
 from codemotion.render.encoder import ExportFormat
-from codemotion.render.renderer import Progress, default_output, render_still, render_video
-from codemotion.script.source import Loaded, load_text, treat_as_script
+from codemotion.render.renderer import (
+    Progress,
+    default_output,
+    program_output,
+    render_still,
+    render_video,
+)
+from codemotion.script.program import make_video
+from codemotion.script.source import (
+    Loaded,
+    SourceKind,
+    load_text,
+    source_kind,
+    treat_as_script,
+)
 from codemotion.script.source import SourceMode as Mode
 from codemotion.script.template import STARTER
 from codemotion.themes.loader import list_themes
@@ -48,7 +61,8 @@ ModeOpt = Annotated[
     Mode,
     typer.Option(
         "--mode",
-        help="auto: scripts import codemotion, anything else is shown as code.",
+        help="auto: scripts import codemotion; programs (Pillow/OpenCV) write their own "
+        "video and are run by 'render'; anything else is shown as code.",
     ),
 ]
 _CODE = "Code files only"
@@ -114,9 +128,16 @@ def _resolve_duration(duration: float | None, stdin_used: bool) -> float:
         return value
 
 
-def _load(source: str, mode: Mode, duration: float | None, **code_options: Any) -> Loaded:
-    """Turn SOURCE into a scene document: run a script, or build the code-card scene."""
-    text = _read_source(source)
+def _load(
+    source: str, mode: Mode, duration: float | None, text: str | None = None, **code_options: Any
+) -> Loaded:
+    """Turn SOURCE into a scene document: run a script, or build the code-card scene.
+
+    ``text`` is SOURCE's contents when already read (stdin can be read only once).
+    """
+    text = _read_source(source) if text is None else text
+    if source_kind(text, mode) is SourceKind.program:
+        raise UserFacingError(PROGRAM_IN_CLI, "script")
     given = {k: v for k, v in code_options.items() if v is not None}
     stdin = source == "-"
     if treat_as_script(text, mode):
@@ -154,6 +175,60 @@ def _default_output(source: str, prepared: PreparedScene) -> Path:
     return default_output(stem, prepared.doc, prepared.preview, config.OUTPUT_DIR)
 
 
+PROGRAM_IN_CLI = (
+    "This is a video program: it draws its own frames and writes a video. "
+    "Run it with 'codemotion render' to get its video."
+)
+_PROGRESS_COLUMNS = (
+    TextColumn("{task.description}"),
+    BarColumn(),
+    TaskProgressColumn(),
+    TextColumn("ETA"),
+    TimeRemainingColumn(),
+)
+_PROGRAM_STAGES = {"program": "Running the program", "import": "Importing its video",
+                   "gif": "Exporting GIF", "webm": "Exporting WEBM"}  # fmt: skip
+
+
+def _render_program(
+    source: str, text: str, output: Path | None, formats: tuple[ExportFormat, ...]
+) -> None:
+    """Run a video program and save the video it writes (see ``script.program``)."""
+    script_path = None if source == "-" else Path(source)
+    stem = "snippet" if script_path is None else script_path.stem
+    target = output or program_output(stem, config.OUTPUT_DIR)
+    if target.suffix.lower() != ".mp4":
+        raise UserFacingError("The output file must end in .mp4.", field="output")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with ProgressBar(*_PROGRESS_COLUMNS, console=err, transient=True) as bar:
+            task = bar.add_task(_PROGRAM_STAGES["program"], total=1000)
+
+            def on_progress(p: Progress) -> None:
+                stage = _PROGRAM_STAGES.get(p.stage, p.stage)
+                bar.update(task, completed=p.done, description=stage)
+
+            result = make_video(
+                text,
+                target,
+                script_path,
+                formats,
+                on_output=lambda line: bar.console.print(f"[dim]program> {escape(line)}[/dim]"),
+                progress=on_progress,
+            )
+    except KeyboardInterrupt:
+        err.print("[yellow]Cancelled; no video was written.[/yellow]")
+        raise typer.Exit(code=130) from None
+    info = result.info
+    out.print(
+        f"Wrote [bold]{escape(str(result.video))}[/bold] ({info.duration:g} s, "
+        f"{info.width}x{info.height} @ {info.fps:g} fps) from the program's "
+        f"{escape(result.written.name)}"
+    )
+    for path in result.exports:
+        out.print(f"Wrote [bold]{escape(str(path))}[/bold]")
+
+
 @app.command()
 def render(
     source: SourceArg,
@@ -173,28 +248,29 @@ def render(
     webm: Annotated[bool, typer.Option("--webm", help="Also export a WebM (VP9).")] = False,
     workers: WorkersOpt = None,
 ) -> None:
-    """Render a video script (or a code file) to an MP4, optionally also GIF and WebM."""
+    """Render a video script (or a code file) to an MP4, optionally also GIF and WebM.
+
+    A video program (a Pillow/OpenCV script that writes its own video) is run instead,
+    and the video it writes is saved as the MP4.
+    """
+    formats: list[ExportFormat] = []
+    if gif:
+        formats.append("gif")
+    if webm:
+        formats.append("webm")
     try:
-        loaded = _load(source, mode, duration, aspect=aspect, fps=fps, theme=theme,
+        text = _read_source(source)
+        if source_kind(text, mode) is SourceKind.program:
+            _render_program(source, text, output, tuple(formats))
+            return
+        loaded = _load(source, mode, duration, text=text, aspect=aspect, fps=fps, theme=theme,
                        style=style, outro=outro, filename=filename)  # fmt: skip
         prepared, plan = _prepare(loaded, preview)
         _warn(plan.warnings)
         target = output or _default_output(source, prepared)
         if target.suffix.lower() != ".mp4":
             raise UserFacingError("The output file must end in .mp4.", field="output")
-        formats: list[ExportFormat] = []
-        if gif:
-            formats.append("gif")
-        if webm:
-            formats.append("webm")
-        columns = (
-            TextColumn("{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TextColumn("ETA"),
-            TimeRemainingColumn(),
-        )
-        with ProgressBar(*columns, console=err, transient=True) as bar:
+        with ProgressBar(*_PROGRESS_COLUMNS, console=err, transient=True) as bar:
             task = bar.add_task("Rendering", total=prepared.total_frames)
 
             def on_progress(p: Progress) -> None:

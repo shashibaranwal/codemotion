@@ -20,7 +20,8 @@ def decode(raw: bytes) -> str:
 def normalize(code: str) -> str:
     """Return the code with unified newlines, tabs as spaces and trailing whitespace removed.
 
-    Raises ``UserFacingError`` if the result is empty or exceeds the input limits.
+    Raises ``UserFacingError`` if the result is empty. Size is not limited: code taller
+    than its card scrolls and lines wider than it wrap (see ``layout``).
     """
     code = code.removeprefix("﻿").replace("\r\n", "\n").replace("\r", "\n")
     if "\x00" in code:
@@ -30,22 +31,4 @@ def normalize(code: str) -> str:
         lines.pop()
     if not lines:
         raise UserFacingError("Paste some Python code first.", field="code")
-
-    text = "\n".join(lines)
-    if len(text) > config.MAX_TOTAL_CHARS:
-        raise UserFacingError(
-            f"Your code has {len(text):,} characters; the maximum is {config.MAX_TOTAL_CHARS:,}.",
-            field="code",
-        )
-    if len(lines) > config.MAX_LINES:
-        raise UserFacingError(
-            f"Your code has {len(lines)} lines; the maximum is {config.MAX_LINES}.", field="code"
-        )
-    for number, line in enumerate(lines, start=1):
-        if len(line) > config.MAX_LINE_LENGTH:
-            raise UserFacingError(
-                f"Line {number} is {len(line)} characters long; "
-                f"the maximum is {config.MAX_LINE_LENGTH}.",
-                field="code",
-            )
-    return text
+    return "\n".join(lines)

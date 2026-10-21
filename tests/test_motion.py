@@ -13,7 +13,18 @@ from conftest import EXAMPLES_DIR, read_source
 from test_elements import bright, center_of, frame_at, scene
 from typer.testing import CliRunner
 
-from codemotion import Code, Group, Line, ScriptError, Shape, Terminal, Text, Video, stagger
+from codemotion import (
+    Code,
+    Group,
+    Line,
+    ScriptError,
+    Shape,
+    Terminal,
+    Text,
+    Video,
+    config,
+    stagger,
+)
 from codemotion.cli import app
 from codemotion.errors import UserFacingError
 from codemotion.geometry import Rect
@@ -159,15 +170,46 @@ def test_terminal_without_command_prints_from_the_start() -> None:
     assert lay.line_times == (0.5,) and lay.line_count == 1
 
 
-def test_terminal_fits_long_lines_or_explains() -> None:
+def test_terminal_shrinks_then_wraps_long_lines() -> None:
     lay, warnings = layout_terminal(_terminal(output="x" * 70, width=1000), Aspect.landscape, 8)
     assert lay.font_size < 28 and "smaller" in warnings[0]
-    with pytest.raises(UserFacingError, match="output line 1 is too wide"):
-        layout_terminal(_terminal(output="x" * 100, width=600), Aspect.landscape, 8)
-    with pytest.raises(UserFacingError, match="the limit is 30"):
-        layout_terminal(_terminal(output="x\n" * 31), Aspect.landscape, 8)
+    assert [len(text) for text, _ in lay.output_rows] == [70]
+    lay, warnings = layout_terminal(_terminal(output="y" * 300, width=600), Aspect.landscape, 8)
+    assert "wrap" in warnings[0]
+    assert lay.font_size == pytest.approx(28 * 0.6)
+    texts = [text for text, _ in lay.output_rows]
+    assert "".join(texts) == "y" * 300 and max(map(len, texts)) == lay.columns
+    assert len({at for _, at in lay.output_rows}) == 1  # one line: its rows print together
+    with pytest.raises(UserFacingError, match="too narrow"):
+        layout_terminal(_terminal(output="x", width=150), Aspect.landscape, 8)
+
+
+def test_terminal_scrolls_once_full() -> None:
+    element = _terminal(output="\n".join(f"line {i}" for i in range(500)), line_interval=0.01)
+    lay, warnings = layout_terminal(element, Aspect.portrait, 8)
+    assert any("scroll up" in w for w in warnings)
+    assert lay.visible_rows < lay.line_count == 502
+    assert lay.height <= config.frame_size("9:16")[1] * (1 - 0.12 - 0.18) + 1e-6
+    assert lay.first_row(0.0) == 0
+    assert lay.first_row(lay.end) == lay.line_count - lay.visible_rows
     _, warnings = layout_terminal(_terminal(output="x\n" * 20, line_interval=1), Aspect.portrait, 8)
     assert "still printing" in warnings[0]
+
+
+def test_terminal_long_command_wraps_and_types_across_rows() -> None:
+    command = "python -m pip install " + " ".join(f"package{i}" for i in range(12))
+    lay, _ = layout_terminal(_terminal(command=command, output="ok", width=700), Aspect.portrait, 8)
+    assert lay.command_rows == (len(command) + 2) // lay.columns + 1 > 1
+    doc = scene({"id": "t", "type": "terminal", "command": command, "output": "ok", "width": 700,
+                 "type_speed": 400}, aspect="9:16")  # fmt: skip
+    # Once typed, the command's last row has text on it.
+    prepared = prepare_scene(doc, preview=False)
+    term = prepared.terminals["t"]
+    frame = frame_at(doc, term.type_end + 0.05)
+    row_y = (prepared.height - term.height) / 2 + term.title_height + term.padding
+    row_y += (term.command_rows - 1 + 0.5) * term.line_height
+    band = frame[round(row_y * 0.5) - 3 : round(row_y * 0.5) + 3]  # stills are 540p previews
+    assert (band.max(axis=2) > 150).sum() > 20
 
 
 # --------------------------------------------------------------------------- rendering
@@ -292,6 +334,42 @@ def test_long_code_scrolls_to_the_end_and_to_highlights() -> None:
     block = build_scene(prepared).nodes[1].drawable.parts[1]  # type: ignore[attr-defined]
     assert block.scroller.offset(prepared.total_frames - 1) == pytest.approx(most, abs=1)
     assert block.scroller.offset(0) == 0.0
+
+
+def test_thousands_of_lines_scroll_to_the_end() -> None:
+    source = "\n".join(f"total_{i} = compute({i}, step={i % 7})" for i in range(3_000))
+    code = {"id": "c", "type": "code", "code": source, "reveal": "line_cascade",
+            "highlights": [{"lines": "2990-2995", "start": 3.5, "fade": 0.1}]}  # fmt: skip
+    prepared = prepare_scene(scene(code, duration=6), preview=True)
+    lay = prepared.codes["c"].layout
+    assert lay.scroll and len(lay.lines) == 3_000 and lay.gutter_digits == 4
+    block = build_scene(prepared).nodes[1].drawable.parts[1]  # type: ignore[attr-defined]
+    centred = scroll_target(lay, 2989, 2994, center=True)
+    assert block.scroller.offset(prepared.total_frames - 1) == pytest.approx(centred, abs=1)
+    # The last frame shows text (the lines near the end), not an empty card.
+    code_area = frame_at(scene(code, duration=6), 5.9)[
+        round(lay.code_rect.y) : round(lay.code_rect.bottom),
+        round(lay.code_rect.x) : round(lay.code_rect.right),
+    ]
+    assert bright(code_area).sum() > 500
+
+
+def test_wrapped_line_is_typed_and_highlighted_as_one_line() -> None:
+    long_line = "total = combine(" + ", ".join(f"value_{i}" for i in range(12)) + ")"
+    highlight = {"lines": "2", "start": 3.2, "fade": 0.2}
+    code = {"id": "c", "type": "code", "code": f"a = 1\n{long_line}\nb = 2", "reveal": "typewriter",
+            "reveal_length": 3, "highlights": [highlight]}  # fmt: skip
+    prepared = prepare_scene(scene(code, aspect="9:16"), preview=True)
+    lay = prepared.codes["c"].layout
+    first, last = lay.rows_of(2)
+    assert last > first
+    drawable = build_scene(prepared).nodes[1].drawable  # type: ignore[attr-defined]
+    _, _, pivot_y = drawable.zoom(round(3.6 * prepared.fps))
+    middle = (lay.lines[first].top + lay.lines[last].top + lay.line_height) / 2
+    assert pivot_y == pytest.approx(middle)
+    reveal = drawable.parts[1].reveal
+    end = round(3.1 * prepared.fps)
+    assert all(reveal.line_view(end, i).columns is None for i in range(len(lay.lines)))
 
 
 def test_highlight_zoom_scales_the_card_about_the_lines() -> None:

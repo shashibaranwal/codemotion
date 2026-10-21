@@ -54,36 +54,49 @@ class TerminalDrawable:
         offset = (lay.line_height - (mono.ascent + mono.descent) * lay.font_size) / 2
         baseline = top + offset + mono.ascent * lay.font_size
 
+        # Rows above ``first`` have scrolled off the top; ``row`` counts from the first
+        # row ever printed.
+        first = lay.first_row(t)
+
         def text(value: str, column: int, row: int, color: Color) -> None:
-            if value.strip():
+            if value.strip() and first <= row < first + lay.visible_rows:
                 blob = canvas.make_text_blob(value, FontRole.mono, lay.font_size)
                 x = x0 + column * lay.char_advance
-                canvas.text_blob(blob, x, baseline + row * lay.line_height, Paint(color=color))
+                y = baseline + (row - first) * lay.line_height
+                canvas.text_blob(blob, x, y, Paint(color=color))
 
         def cursor(column: int, row: int, since: float) -> None:
-            if cursor_visible(t * ctx.fps, since * ctx.fps, ctx.fps):
+            if first <= row < first + lay.visible_rows and cursor_visible(
+                t * ctx.fps, since * ctx.fps, ctx.fps
+            ):
                 height = lay.font_size * config.CURSOR_HEIGHT_FACTOR
-                y = top + row * lay.line_height + (lay.line_height - height) / 2
+                y = top + (row - first) * lay.line_height + (lay.line_height - height) / 2
                 x = x0 + column * lay.char_advance
                 canvas.rect(Rect(x, y, lay.char_advance, height), Paint(color=theme.text.cursor))
 
+        def at_cell(offset: int) -> tuple[int, int]:
+            """(column, row) of the command line's ``offset``-th cell, wrapped."""
+            return offset % lay.columns, offset // lay.columns
+
         prompt = lay.prompt + " "
-        row = 0
         if lay.command is not None:
             text(lay.prompt, 0, 0, theme.terminal.prompt)
             typed = lay.typed(t)
-            text(lay.command[:typed], len(prompt), 0, theme.text.default)
+            command = lay.command[:typed]
+            for row in range(lay.command_rows):  # the command's part on each row
+                lo = max(row * lay.columns, len(prompt))
+                part = command[lo - len(prompt) : (row + 1) * lay.columns - len(prompt)]
+                text(part, lo - row * lay.columns, row, theme.text.default)
             if t < lay.reveal_start:
-                cursor(len(prompt), 0, -1.0)  # blinking, waiting
+                cursor(*at_cell(len(prompt)), -1.0)  # blinking, waiting
             elif not lay.line_times or t < lay.line_times[0]:
                 last_key = min(t, lay.type_end) if typed else lay.reveal_start
-                cursor(len(prompt) + typed, 0, last_key)
-            row = 1
-        for index, (line, at) in enumerate(zip(lay.output, lay.line_times, strict=True)):
+                cursor(*at_cell(len(prompt) + typed), last_key)
+        for index, (line, at) in enumerate(lay.output_rows):
             if t >= at:
-                text(line, 0, row + index, theme.terminal.text)
+                text(line, 0, lay.command_rows + index, theme.terminal.text)
         if lay.command is not None and t >= lay.end:
-            final = row + len(lay.output)
+            final = lay.command_rows + len(lay.output_rows)
             text(lay.prompt, 0, final, theme.terminal.prompt)
             cursor(len(prompt), final, lay.end)
 

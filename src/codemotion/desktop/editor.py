@@ -224,7 +224,9 @@ class CodeEditor(QPlainTextEdit):
         paths = [Path(url.toLocalFile()) for url in source.urls() if url.isLocalFile()]
         if paths:
             self.files_dropped.emit(paths)
-        elif not source.hasUrls():
+        else:
+            # Text copied from a browser or chat page often carries web links too; paste
+            # the text (dropping it all lost whole pastes).
             super().insertFromMimeData(source)
 
     # -- gutter --------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import pytest
 from codemotion import config
 from codemotion.errors import UserFacingError
 from codemotion.models import Aspect, RenderRequest, Style, parse_request
+from codemotion.script.doc import TextElement
 
 
 @pytest.mark.parametrize(
@@ -60,8 +61,7 @@ def test_duration_is_required() -> None:
         ("fps", 45, "30 or 60"),
         ("aspect", "4:3", "9:16, 1:1, 16:9"),
         ("style", "spin", "typewriter"),
-        ("title", "x" * 61, "60 characters"),
-        ("caption", "x" * 81, "80 characters"),
+        ("filename", "", "1 to 40 characters"),
         ("bogus", 1, "Unknown setting"),
     ],
 )
@@ -70,6 +70,14 @@ def test_field_errors_are_friendly(field: str, value: object, snippet: str) -> N
         parse_request({"code": "x", "duration": 8, field: value})
     assert info.value.field == field
     assert snippet in info.value.message
+
+
+def test_text_fields_have_no_length_limit() -> None:
+    long = "x" * 5_000
+    req = parse_request({"code": "x", "duration": 8, "title": long, "caption": long,
+                         "output_text": long})  # fmt: skip
+    assert req.title == req.caption == req.output_text == long
+    assert TextElement.model_validate({"id": "t", "text": long}).text == long
 
 
 def test_user_facing_error_to_dict() -> None:

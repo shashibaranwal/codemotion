@@ -23,7 +23,6 @@ from codemotion.timeline.easing import EASINGS
 
 MAX_ELEMENTS = 60
 MAX_ANIMS = 80
-MAX_TEXT_LENGTH = 400
 
 AnimProp = Literal["x", "y", "ox", "oy", "opacity", "scale", "rotation", "reveal"]
 THEME_COLORS = ("text", "accent", "muted", "card", "gutter", "background")
@@ -112,7 +111,7 @@ class _Element(_Model):
 
 class TextElement(_Element):
     type: Literal["text"] = "text"
-    text: str = Field(max_length=MAX_TEXT_LENGTH)
+    text: str
     size: float = Field(48.0, gt=0, le=400)
     font: Literal["sans", "sans_bold", "mono", "mono_bold"] = "sans"
     color: str = "text"
@@ -200,8 +199,8 @@ class TerminalElement(_Element):
     """A terminal panel: a prompt and command typed, then output lines printed."""
 
     type: Literal["terminal"] = "terminal"
-    output: str = Field("", max_length=config.TERMINAL_MAX_CHARS)
-    command: str | None = Field("python main.py", max_length=config.TERMINAL_MAX_LINE)
+    output: str = ""  # any length: long lines wrap, older lines scroll up
+    command: str | None = "python main.py"
     prompt: str = Field("$", max_length=8)
     title: str = Field("Terminal", max_length=40)
     size: float = Field(config.TERMINAL_FONT_SIZE, gt=0, le=120)

@@ -80,12 +80,12 @@ def test_missing_file_is_friendly(tmp_path: Path) -> None:
     assert "File not found" in result.output
 
 
-def test_too_wide_line_is_friendly(tmp_path: Path) -> None:
+def test_too_wide_line_wraps_with_a_warning(tmp_path: Path) -> None:
     result = runner.invoke(
         app, ["still", "-", "--duration", "8", "-o", str(tmp_path / "f.png")], input="x" * 80 + "\n"
     )
-    assert result.exit_code == 1
-    assert "too wide" in result.output
+    assert result.exit_code == 0
+    assert "they wrap" in result.output
 
 
 def test_themes_lists_midnight() -> None:

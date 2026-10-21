@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QKeySequence,
 )
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -46,6 +47,7 @@ from codemotion.desktop.editor import CodeEditor
 from codemotion.desktop.preview import PreviewPanel
 from codemotion.desktop.workers import (
     LatestWins,
+    ProgramJob,
     RenderJob,
     RenderWorker,
     RunRequest,
@@ -56,13 +58,37 @@ from codemotion.desktop.workers import (
 from codemotion.errors import UserFacingError
 from codemotion.models import ElementPlan, SoundPlan
 from codemotion.render.encoder import ExportFormat
-from codemotion.render.renderer import Progress, default_output
+from codemotion.render.renderer import Progress, default_output, program_output
+from codemotion.script.program import ProgramResult, incomplete
 from codemotion.script.runner import ScriptRunError
-from codemotion.script.source import treat_as_script
+from codemotion.script.source import SourceKind, SourceMode, source_kind
 from codemotion.script.template import STARTER
 
 _LINE_ROLE = Qt.ItemDataRole.UserRole
 _PATH_ROLE = Qt.ItemDataRole.UserRole + 1
+_STAGE_LABELS = {"frames": "", "program": "Running the program ", "import": "Importing "}
+
+PROGRAM_HINT = (
+    "This is a video program: it draws its own frames (Pillow/OpenCV) and writes a video. "
+    "Press Run to run it and play its video, or Render to also save it to Renders. "
+    "It isn't run automatically while you type."
+)
+CODE_CARD_HINT = (
+    "Shown as a code card: this code doesn't import codemotion or an image/video library "
+    "(Pillow, OpenCV…), so it's displayed, not run. To run it, choose Run as → Video program."
+)
+# Toolbar "Run as" choices; Auto's label also shows what it detected.
+RUN_AS = (
+    (SourceMode.auto, "Auto"),
+    (SourceMode.script, "Video script (CodeMotion)"),
+    (SourceMode.program, "Video program (Pillow/OpenCV)"),
+    (SourceMode.code, "Code card"),
+)
+KIND_NAMES = {
+    SourceKind.script: "video script",
+    SourceKind.program: "video program",
+    SourceKind.code: "code card",
+}
 
 
 def app_settings() -> QSettings:
@@ -133,6 +159,7 @@ class MainWindow(QMainWindow):
         self.newline = "\n"  # the open file's line endings, kept on save
         self.code_options: dict[str, Any] | None = None  # plain code files only
         self.result: RunResult | None = None  # the last successful run
+        self.source_mode = SourceMode.auto  # Run as; reset for each file
         self.problems: list[Problem] = []
         self._after_run: str | None = None  # "render" or "preview" once the run is current
         self._preview_dir = Path(tempfile.mkdtemp(prefix="codemotion-preview-"))
@@ -147,6 +174,7 @@ class MainWindow(QMainWindow):
         self.stills.failed.connect(self._on_still_failed)
         self.renderer = RenderWorker(self)
         self.renderer.progress.connect(self._on_render_progress)
+        self.renderer.output.connect(self.output_view_append)
         self.renderer.finished.connect(self._on_render_finished)
         self.renderer.failed.connect(self._on_render_failed)
         self.renderer.cancelled.connect(self._on_render_cancelled)
@@ -303,6 +331,17 @@ class MainWindow(QMainWindow):
             toolbar.addAction(action)
         toolbar.addSeparator()
         toolbar.addAction(self.auto_run_action)
+        toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" Run as: "))
+        self.mode_box = QComboBox()
+        self.mode_box.setToolTip(
+            "How to treat the code: Auto decides from its imports (codemotion → video script; "
+            "Pillow/OpenCV → video program; anything else → code card)"
+        )
+        for mode, label in RUN_AS:
+            self.mode_box.addItem(label, mode)
+        self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
+        toolbar.addWidget(self.mode_box)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -413,7 +452,7 @@ class MainWindow(QMainWindow):
         self._add_recent(path)
         self.newline = "\r\n" if b"\r\n" in raw else "\n"
         self._load_text(text.replace("\r\n", "\n"), path, run=False)
-        if not treat_as_script(text) and ask_code_settings:
+        if self.kind is SourceKind.code and ask_code_settings:
             self.edit_code_settings(run=False)
         self.run(auto=True)
         return True
@@ -481,7 +520,12 @@ class MainWindow(QMainWindow):
         self.path = path
         self.code_options = None
         self.result = None
+        self.source_mode = SourceMode.auto
+        self.mode_box.blockSignals(True)
+        self.mode_box.setCurrentIndex(0)
+        self.mode_box.blockSignals(False)
         self.editor.setPlainText(text)
+        self._update_kind_label()
         self.editor.document().setModified(False)
         self.editor.set_error_line(None)
         self.auto_timer.stop()
@@ -509,14 +553,37 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ running
 
+    @property
+    def kind(self) -> SourceKind:
+        """What the editor holds, as Run as says (Auto: detected from its imports)."""
+        return source_kind(self.editor.toPlainText(), self.source_mode)
+
+    @property
+    def is_program(self) -> bool:
+        """True if the editor holds a video program (it writes its own video)."""
+        return self.kind is SourceKind.program
+
+    def output_view_append(self, line: str) -> None:
+        self.output_view.appendPlainText(line)
+
+    def _update_kind_label(self) -> None:
+        """Show what Auto detected, e.g. "Auto: video program"."""
+        detected = KIND_NAMES[source_kind(self.editor.toPlainText())]
+        self.mode_box.setItemText(0, f"Auto: {detected}")
+
+    def _on_mode_changed(self, index: int) -> None:
+        self.source_mode = SourceMode(self.mode_box.itemData(index))
+        self.result = None
+        self.run(auto=True)
+
     def current_request(self) -> RunRequest | None:
         """What a run would execute now; None for a code file without settings."""
         text = self.editor.toPlainText()
-        if treat_as_script(text):
-            return RunRequest(text, self.base_dir)
+        if self.kind is SourceKind.script:
+            return RunRequest(text, self.base_dir, SourceMode.script)
         if self.code_options is None:
             return None
-        return RunRequest(text, self.base_dir, code_options=dict(self.code_options))
+        return RunRequest(text, self.base_dir, SourceMode.code, dict(self.code_options))
 
     def run(self, auto: bool = False) -> bool:
         """Run the script (or build the code card); False if nothing was started."""
@@ -524,14 +591,29 @@ class MainWindow(QMainWindow):
         if not self.editor.toPlainText().strip():
             self._set_problems([])
             return False
+        if self.is_program:
+            # Programs render every frame themselves (slow, and they write files), so they
+            # run only when asked: Run plays the video, Render also saves it.
+            if auto:
+                self.result = None
+                self._fill_elements([])
+                problems = [Problem("warning", PROGRAM_HINT)]
+                cut_off = incomplete(self.editor.toPlainText())
+                if cut_off is not None:  # say so now, not after a run that does nothing
+                    problems.insert(0, Problem("error", *cut_off))
+                self._set_problems(problems)
+                self.statusBar().showMessage("Video program: press Run or Render to run it.")
+                return False
+            self.render_script(preview=True)
+            return True
         request = self.current_request()
         if request is None and not auto and self.edit_code_settings(run=False):
             request = self.current_request()
         if request is None:
             self._set_problems([Problem(
                 "warning",
-                "This file doesn't import codemotion, so it's shown as a code card. "
-                "Choose its settings in Video → Code card settings…",
+                "This is shown as a code card: choose its settings in Video → Code card "
+                "settings…, or to run it, choose Run as → Video program.",
             )])  # fmt: skip
             return False
         self.statusBar().showMessage("Running…")
@@ -548,6 +630,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _on_text_changed(self) -> None:
+        self._update_kind_label()
         if self.auto_run_action.isChecked():
             self.auto_timer.start()
 
@@ -556,7 +639,10 @@ class MainWindow(QMainWindow):
         self.result = result
         plan = result.plan
         self.editor.set_error_line(None)
-        self._set_problems([Problem("warning", w) for w in plan.warnings])
+        problems = [Problem("warning", w) for w in plan.warnings]
+        if not result.loaded.is_script and self.source_mode is SourceMode.auto:
+            problems.insert(0, Problem("warning", CODE_CARD_HINT))
+        self._set_problems(problems)
         self.output_view.setPlainText(result.loaded.output)
         self._fill_elements(plan.elements, plan.sounds)
         self.preview.set_duration(plan.duration)
@@ -661,6 +747,9 @@ class MainWindow(QMainWindow):
         if self.renderer.busy:
             self.statusBar().showMessage("A render is already running.")
             return
+        if self.is_program:
+            self._start_program(preview)
+            return
         if self.result is not None and self.result.request == self.current_request():
             self._start_render(preview)
             return
@@ -691,6 +780,31 @@ class MainWindow(QMainWindow):
         self.renderer.start(job)
         self._set_rendering(True, "Preview" if preview else "Render")
 
+    def _start_program(self, preview: bool) -> None:
+        """Run the video program; Run (``preview``) plays its video, Render also lists it."""
+        folder = self._preview_dir if preview else self.output_dir
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._set_problems([Problem("error", f"Could not create {folder}: {exc.strerror}.")])
+            return
+        stem = self.path.stem if self.path else "untitled"
+        job = ProgramJob(
+            source=self.editor.toPlainText(),
+            output=program_output(stem, folder),
+            preview=preview,
+            script_path=self.path,
+            formats=() if preview else self.export_formats(),
+        )
+        self.editor.set_error_line(None)
+        self._set_problems([])
+        self._fill_elements([])
+        self.output_view.clear()
+        self.bottom_tabs.setCurrentWidget(self.output_view)
+        self.renderer.start(job)
+        self._set_rendering(True, "Running the program")
+        self.statusBar().showMessage("Running the video program…")
+
     def export_formats(self) -> tuple[ExportFormat, ...]:
         """Extra formats a full render writes, from Video → Also export …"""
         formats: list[ExportFormat] = []
@@ -720,23 +834,41 @@ class MainWindow(QMainWindow):
     def _on_render_progress(self, progress: Progress) -> None:
         self.progress_bar.setValue(round(progress.fraction * 1000))
         eta = f" · ETA {progress.eta:.0f} s" if progress.eta is not None else ""
-        stage = "" if progress.stage == "frames" else f"Exporting {progress.stage.upper()} "
+        stage = _STAGE_LABELS.get(progress.stage, f"Exporting {progress.stage.upper()} ")
         self.progress_label.setText(f"{stage}{progress.fraction:.0%}{eta}")
 
-    def _on_render_finished(self, outcome: tuple[RenderJob, Path]) -> None:
-        job, video = outcome
+    def _on_render_finished(
+        self, outcome: tuple[RenderJob, Path] | tuple[ProgramJob, ProgramResult]
+    ) -> None:
+        job, result = outcome
         self._set_rendering(False)
+        video = result.video if isinstance(result, ProgramResult) else result
         if not job.preview:
             self.refresh_renders(select=video)
         self.preview.play(video)
+        if isinstance(result, ProgramResult):
+            info = result.info
+            saved = "Saved" if not job.preview else "Ran"
+            self.statusBar().showMessage(
+                f"{saved}: the program ran in {result.seconds:.1f} s · {info.width}x"
+                f"{info.height} · {info.duration:g} s · {video}"
+            )
+            return
         what = "Preview" if job.preview else "Rendered"
         self.statusBar().showMessage(f"{what}: {video}")
 
-    def _on_render_failed(self, outcome: tuple[RenderJob, Exception]) -> None:
-        _, error = outcome
+    def _on_render_failed(
+        self, outcome: tuple[RenderJob, Exception] | tuple[ProgramJob, Exception]
+    ) -> None:
+        job, error = outcome
         self._set_rendering(False)
         message = error.message if isinstance(error, UserFacingError) else repr(error)
-        self._set_problems([*self.problems, Problem("error", f"Render failed: {message}")])
+        if isinstance(job, ProgramJob):
+            line = error.line if isinstance(error, ScriptRunError) else None
+            self._set_problems([Problem("error", f"The program failed: {message}", line)])
+            self.editor.set_error_line(line)
+        else:
+            self._set_problems([*self.problems, Problem("error", f"Render failed: {message}")])
         self.bottom_tabs.setCurrentWidget(self.problem_list)
         self.statusBar().showMessage("Render failed; see Problems.")
 
@@ -784,8 +916,9 @@ class MainWindow(QMainWindow):
             self,
             "Running scripts",
             f"{config.TRUST_NOTICE}\n\nCodeMotion runs each script in a separate process with "
-            f"a {config.SCRIPT_TIMEOUT_SECONDS:g} second limit, but that isn't a sandbox: a "
-            "script can do anything a normal Python file can.",
+            f"a {config.SCRIPT_TIMEOUT_SECONDS:g} second limit (video programs, which render "
+            f"their own frames: {config.PROGRAM_TIMEOUT_SECONDS / 60:g} minutes), but that "
+            "isn't a sandbox: a script can do anything a normal Python file can.",
         )
 
     def show_about(self) -> None:

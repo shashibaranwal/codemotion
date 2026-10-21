@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from codemotion import __version__
+from codemotion import __version__, config
 from codemotion.errors import UserFacingError
 from codemotion.pipeline import PreparedScene
 from codemotion.render.canvas import SkiaCanvas
 from codemotion.render.encoder import (
     ExportFormat,
     FFmpegEncoder,
+    VideoInfo,
     export_video,
 )
 from codemotion.render.encoder import RenderCancelledError as RenderCancelledError
@@ -158,6 +159,47 @@ def default_output(stem: str, doc: SceneDoc, preview: bool, folder: Path) -> Pat
     while path.exists():
         path = folder / f"{base}-{n}.mp4"
         n += 1
+    return path
+
+
+def program_output(stem: str, folder: Path) -> Path:
+    """A new, unused ``folder/{stem}-{timestamp}.mp4`` path for a video program's video."""
+    base = f"{stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    path = folder / f"{base}.mp4"
+    n = 2
+    while path.exists():
+        path = folder / f"{base}-{n}.mp4"
+        n += 1
+    return path
+
+
+def aspect_label(width: int, height: int) -> str:
+    """ "9:16", "1:1" or "16:9" when the size matches one (within 1 %), else "WxH"."""
+    for name, preset in config.ASPECT_PRESETS.items():
+        if abs(width / height - preset.width / preset.height) < 0.01 * width / height:
+            return name
+    return f"{width}x{height}"
+
+
+def write_program_sidecar(
+    video: Path, info: VideoInfo, source: str | None = None, exports: list[Path] | None = None
+) -> Path:
+    """The sidecar of a video a program wrote (so it's listed with the renders)."""
+    data = {
+        "codemotion": __version__,
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
+        "video": video.name,
+        "exports": [path.name for path in exports or []],
+        "source": source,
+        "program": True,
+        "preview": False,
+        "fps": info.fps,
+        "size": [info.width, info.height],
+        "scene": {"aspect": aspect_label(info.width, info.height), "duration": info.duration},
+        "warnings": [],
+    }
+    path = sidecar_path(video)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
 

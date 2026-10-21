@@ -118,7 +118,8 @@ def _scroller(
         amounts = [(a, spot) for spot in spotlights if (a := spot.amount.at(frame)) > 0]
         if amounts:
             spot = max(amounts, key=lambda pair: pair[0])[1]
-            targets.append(scroll_target(lay, min(spot.lines) - 1, max(spot.lines) - 1, True))
+            first, last = lay.rows_of(min(spot.lines))[0], lay.rows_of(max(spot.lines))[1]
+            targets.append(scroll_target(lay, first, last, True))
         else:
             line = _revealing_line(reveal, frame, len(lay.lines))
             targets.append(scroll_target(lay, line, line))
@@ -142,8 +143,8 @@ def _zoom(code: PreparedCode, spotlights: list[Spotlight], scroller: Scroller) -
         for spot, factor in zooms:
             value = 1 + (factor - 1) * spot.amount.at(frame)
             if value > best:
-                first, last = min(spot.lines), max(spot.lines)
-                top, bottom = lay.lines[first - 1].top, lay.lines[last - 1].top + lay.line_height
+                first, last = lay.rows_of(min(spot.lines))[0], lay.rows_of(max(spot.lines))[1]
+                top, bottom = lay.lines[first].top, lay.lines[last].top + lay.line_height
                 pivot_y = (top + bottom) / 2 - scroller.offset(frame)
                 best = value
         pivot_y = min(max(pivot_y, lay.code_rect.y), lay.code_rect.bottom)

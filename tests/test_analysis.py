@@ -36,31 +36,23 @@ def test_empty_code_rejected(code: str) -> None:
         normalize(code)
 
 
-def test_too_many_lines() -> None:
-    code = "\n".join(f"x{i} = {i}" for i in range(74))
-    with pytest.raises(UserFacingError, match=r"Your code has 74 lines; the maximum is 60."):
-        normalize(code)
+def test_line_count_is_unlimited() -> None:
+    code = "\n".join(f"value_{i} = {i}" for i in range(5_000))
+    assert normalize(code).count("\n") == 4_999
 
 
-def test_max_lines_allowed() -> None:
-    assert normalize("\n".join(["x"] * config.MAX_LINES)).count("\n") == config.MAX_LINES - 1
+def test_line_length_is_unlimited() -> None:
+    code = "a = 1\n" + "b" * 500
+    assert normalize(code) == code
 
 
-def test_line_too_long() -> None:
-    code = "a = 1\n" + "b" * 101
-    with pytest.raises(UserFacingError, match="Line 2 is 101 characters long; the maximum is 100"):
-        normalize(code)
+def test_tabs_expand_to_spaces() -> None:
+    assert normalize("\tx") == " " * config.TAB_SIZE + "x"
 
 
-def test_line_length_counts_expanded_tabs() -> None:
-    with pytest.raises(UserFacingError, match="Line 1"):
-        normalize("\t" + "x" * 97)
-
-
-def test_too_many_chars() -> None:
-    code = "\n".join(["x" * 99] * 31)
-    with pytest.raises(UserFacingError, match="3,099 characters; the maximum is 3,000"):
-        normalize(code)
+def test_total_size_is_unlimited() -> None:
+    code = "\n".join(["x" * 100] * 2_000)
+    assert len(normalize(code)) == len(code)
 
 
 def test_comments_only_is_allowed() -> None:

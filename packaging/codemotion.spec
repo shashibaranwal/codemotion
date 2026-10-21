@@ -22,6 +22,9 @@ stdlib = [m for m in sorted(sys.stdlib_module_names)
           if not m.startswith("_") and m not in SKIP_STDLIB
           and importlib.util.find_spec(m) is not None]  # skips other platforms' modules
 hiddenimports = collect_submodules("codemotion") + stdlib
+# Video programs (Pillow/OpenCV scripts that write their own video) import these; CodeMotion
+# itself never does, so PyInstaller wouldn't find them. ImageTk needs tkinter (excluded).
+hiddenimports += [m for m in collect_submodules("PIL") if m != "PIL.ImageTk"] + ["cv2"]
 
 # Qt modules CodeMotion doesn't use (the PySide6 wheels ship all of them).
 excludes = [

@@ -50,11 +50,11 @@ class RenderRequest(BaseModel):
     style: Style = Style.typewriter
     focus: str | None = None
     filename: str = Field(config.DEFAULT_FILENAME, min_length=1, max_length=40)
-    title: str | None = Field(None, max_length=config.TITLE_MAX_LENGTH)
-    caption: str | None = Field(None, max_length=config.CAPTION_MAX_LENGTH)
+    title: str | None = None
+    caption: str | None = None
     watermark_path: Path | None = None
     output_mode: OutputMode = OutputMode.off
-    output_text: str | None = Field(None, max_length=config.OUTPUT_TEXT_MAX_LENGTH)
+    output_text: str | None = None
     outro: Literal["fade", "hold"] = "hold"
     formats: set[OutputFormat] = Field(default_factory=_default_formats)
     preview: bool = False
@@ -93,9 +93,6 @@ _FIELD_MESSAGES: dict[str, str] = {
     "fps": "FPS must be " + " or ".join(str(f) for f in config.FPS_OPTIONS) + ".",
     "style": "Style must be one of " + ", ".join(s.value for s in Style) + ".",
     "output_mode": "Output panel must be one of " + ", ".join(m.value for m in OutputMode) + ".",
-    "title": f"The title can be at most {config.TITLE_MAX_LENGTH} characters.",
-    "caption": f"The caption can be at most {config.CAPTION_MAX_LENGTH} characters.",
-    "output_text": f"The output text can be at most {config.OUTPUT_TEXT_MAX_LENGTH} characters.",
     "filename": "The file name must be 1 to 40 characters.",
     "outro": "Outro must be 'fade' or 'hold'.",
     "formats": "Formats must be any of mp4, gif, webm.",

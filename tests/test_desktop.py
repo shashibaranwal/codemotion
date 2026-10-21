@@ -17,6 +17,7 @@ from PySide6.QtCore import QMimeData, QSettings, Qt, QUrl
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QDialog
 from pytestqt.qtbot import QtBot
+from test_program import program
 
 from codemotion.desktop import dialogs, main_window
 from codemotion.desktop.app import dark_palette
@@ -258,6 +259,17 @@ def test_editor_hands_dropped_files_to_the_window(qtbot: QtBot, tmp_path: Path) 
     assert editor.toPlainText() == ""
 
 
+def test_editor_pastes_long_text_even_with_web_links(qtbot: QtBot) -> None:
+    editor = CodeEditor()
+    qtbot.addWidget(editor)
+    text = "\n".join(f"line_{i} = {i}" for i in range(2_000))
+    mime = QMimeData()
+    mime.setUrls([QUrl("https://chat.example.com/c/1")])  # copied from a web page
+    mime.setText(text)
+    editor.insertFromMimeData(mime)
+    assert editor.toPlainText() == text and editor.blockCount() == 2_000
+
+
 # --------------------------------------------------------------------------- dialogs & app
 
 
@@ -280,6 +292,62 @@ def test_dark_palette_uses_config_colours() -> None:
 
 
 # --------------------------------------------------------------------------- main window
+
+
+def test_window_runs_a_video_program_only_when_asked(window: MainWindow, qtbot: QtBot) -> None:
+    window.editor.setPlainText(program())
+    assert not window.run(auto=True)  # typing never starts a program
+    assert "video program" in window.problems[0].message and not window.renderer.busy
+    with qtbot.waitSignal(window.renderer.finished, timeout=WAIT) as blocker:
+        window.render_script()
+    _, result = blocker.args[0]
+    assert result.video.is_file() and result.video.parent == window.output_dir
+    assert [e.aspect for e in list_renders(window.output_dir)] == ["64x48"]
+    assert "Rendered 10/10 frames" in window.output_view.toPlainText()
+    # Run plays the video without adding it to the renders.
+    with qtbot.waitSignal(window.renderer.finished, timeout=WAIT) as blocker:
+        assert window.run()
+    assert blocker.args[0][1].video.parent != window.output_dir
+    assert len(list_renders(window.output_dir)) == 1
+
+
+def test_window_says_when_a_pasted_program_is_cut_off(window: MainWindow) -> None:
+    full = program().splitlines()
+    window.editor.setPlainText("\n".join(full[:4]) + "\n\ndef add_glow(img):\n    d = 1\n")
+    assert not window.run(auto=True)
+    assert window.mode_box.itemText(0) == "Auto: video program"
+    error = window.problems[0]
+    assert error.severity == "error" and "cut off" in error.message and error.line == 7
+
+
+def test_window_run_as_overrides_detection(window: MainWindow, qtbot: QtBot) -> None:
+    window.editor.setPlainText("print('hello')\n")
+    assert window.mode_box.itemText(0) == "Auto: code card"
+    assert window.kind.value == "code"
+    window.mode_box.setCurrentIndex(2)  # Video program
+    assert window.is_program and "video program" in window.problems[0].message
+    window.mode_box.setCurrentIndex(3)  # Code card, even for a CodeMotion script
+    window.editor.setPlainText(script())
+    assert window.kind.value == "code" and window.mode_box.itemText(0) == "Auto: video script"
+    # Opening another file goes back to Auto.
+    window._load_text(script(), None, run=False)
+    assert window.mode_box.currentIndex() == 0 and window.kind.value == "script"
+
+
+def test_window_explains_why_code_is_shown_as_a_card(window: MainWindow, qtbot: QtBot) -> None:
+    window.code_options = {"duration": 4}
+    window.editor.setPlainText("x = 1\n")
+    with qtbot.waitSignal(window.runner.finished, timeout=WAIT):
+        assert window.run()
+    assert "Run as → Video program" in window.problems[0].message
+
+
+def test_window_shows_a_failing_program_on_its_line(window: MainWindow, qtbot: QtBot) -> None:
+    window.editor.setPlainText("import cv2\n\nx = 1\nraise ValueError('bad')\ncv2.VideoWriter()\n")
+    with qtbot.waitSignal(window.renderer.failed, timeout=WAIT):
+        window.render_script()
+    assert window.problems[0].line == 4 and "ValueError: bad" in window.problems[0].message
+    assert window.editor.error_line == 4
 
 
 def test_window_runs_the_starter_script_on_open(window: MainWindow, qtbot: QtBot) -> None:

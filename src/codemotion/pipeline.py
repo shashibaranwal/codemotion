@@ -194,7 +194,7 @@ def _prepare_code(
         code = normalize(element.code)
         layout = compute_layout(tokenize(code), doc.aspect, preview, _region(element, doc, preview))
         highlights = tuple(
-            (parse_line_ranges(h.lines, len(layout.lines), "Highlight lines"), h)
+            (parse_line_ranges(h.lines, layout.line_count, "Highlight lines"), h)
             for h in element.highlights
         )
     except UserFacingError as exc:
