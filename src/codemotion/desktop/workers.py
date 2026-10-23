@@ -27,6 +27,7 @@ from codemotion.render.renderer import (
     StillRenderer,
     render_video,
 )
+from codemotion.review import FrameSession, program_review, scene_review
 from codemotion.script.doc import SceneDoc
 from codemotion.script.program import make_video
 from codemotion.script.source import Loaded, SourceMode, load_text
@@ -163,13 +164,42 @@ class ProgramJob:
     formats: tuple[ExportFormat, ...] = ()
 
 
+@dataclass(frozen=True)
+class FramesJob:
+    """Generate the frames of a review (``codemotion.review``): a scene's (``doc``) or a
+    video program's (``source``, which is run)."""
+
+    output_dir: Path
+    stem: str
+    doc: SceneDoc | None = None
+    source: str | None = None
+    script_path: Path | None = None
+    preview: bool = True  # nothing is added to the renders
+
+
+@dataclass(frozen=True)
+class ReviewRenderJob:
+    """Render a review's approved frames as the final video ``output``."""
+
+    session: FrameSession
+    output: Path
+    formats: tuple[ExportFormat, ...] = ()
+    preview: bool = False
+
+
+AnyJob = RenderJob | ProgramJob | FramesJob | ReviewRenderJob
+
+
 class RenderWorker(QObject):
-    """Renders one video at a time with progress and cancel: a scene (``RenderJob``) or
-    a video program's own video (``ProgramJob``)."""
+    """Renders one video at a time with progress and cancel: a scene (``RenderJob``), a
+    video program's own video (``ProgramJob``), a review's frames (``FramesJob``) or its
+    final video (``ReviewRenderJob``)."""
 
     progress = Signal(object)  # Progress
     output = Signal(str)  # a line a video program printed
-    finished = Signal(object)  # (RenderJob, Path of the video) | (ProgramJob, ProgramResult)
+    # (RenderJob, Path of the video) | (ProgramJob, ProgramResult) | (FramesJob,
+    # FrameSession) | (ReviewRenderJob, Path of the video)
+    finished = Signal(object)
     failed = Signal(object)  # (job, exception)
     cancelled = Signal(object)  # the job
     _progress = Signal(object)
@@ -180,7 +210,7 @@ class RenderWorker(QObject):
         super().__init__(parent)
         self._thread: threading.Thread | None = None
         self._token = CancelToken()
-        self.job: RenderJob | ProgramJob | None = None
+        self.job: AnyJob | None = None
         self._progress.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
         self._output.connect(self._on_output, Qt.ConnectionType.QueuedConnection)
         self._done.connect(self._on_done, Qt.ConnectionType.QueuedConnection)
@@ -197,7 +227,7 @@ class RenderWorker(QObject):
         if self._thread is not None:  # drop updates that arrive after the render ended
             self.progress.emit(progress)
 
-    def start(self, job: RenderJob | ProgramJob) -> None:
+    def start(self, job: AnyJob) -> None:
         if self._thread is not None:
             raise RuntimeError("a render is already running")
         self.job = job
@@ -217,6 +247,16 @@ class RenderWorker(QObject):
                 if isinstance(job, ProgramJob):
                     result = make_video(job.source, job.output, job.script_path, job.formats,
                                         self._output.emit, on_progress, token)  # fmt: skip
+                elif isinstance(job, FramesJob):
+                    source = str(job.script_path) if job.script_path is not None else None
+                    if job.doc is not None:
+                        result = scene_review(job.doc, job.output_dir, job.stem, source)
+                    else:
+                        result = program_review(job.source or "", job.output_dir, job.stem,
+                                                job.script_path, self._output.emit,
+                                                on_progress, token)  # fmt: skip
+                elif isinstance(job, ReviewRenderJob):
+                    result = job.session.render(job.output, on_progress, token, job.formats)
                 else:
                     prepared = prepare_scene(job.doc, job.preview)
                     result = render_video(prepared, job.output, on_progress, token, job.source,
@@ -237,9 +277,7 @@ class RenderWorker(QObject):
         if thread is not None:
             thread.join(timeout)
 
-    def _on_done(
-        self, job: RenderJob | ProgramJob, result: object, error: Exception | None
-    ) -> None:
+    def _on_done(self, job: AnyJob, result: object, error: Exception | None) -> None:
         self._thread = None
         if isinstance(error, RenderCancelledError):
             self.cancelled.emit(job)

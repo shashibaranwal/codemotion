@@ -41,7 +41,7 @@ def ffmpeg_exe() -> str:
 
 
 def mp4_command(
-    exe: str, width: int, height: int, fps: int, path: Path, audio: Path | None = None
+    exe: str, width: int, height: int, fps: float, path: Path, audio: Path | None = None
 ) -> list[str]:
     """Raw RGBA frames on stdin -> H.264 MP4; ``audio`` (a WAV as long as the video) is
     muxed in as AAC."""
@@ -91,7 +91,7 @@ class FFmpegEncoder:
     """Context manager: ``write()`` frames, then ``finish()``; any exception aborts."""
 
     def __init__(
-        self, path: Path, width: int, height: int, fps: int, audio: Path | None = None
+        self, path: Path, width: int, height: int, fps: float, audio: Path | None = None
     ) -> None:
         self.path = path
         self.audio = audio

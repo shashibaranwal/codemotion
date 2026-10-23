@@ -68,6 +68,19 @@ full-quality MP4 to the output folder (File → Choose output folder…), with p
 Cancel, and lists it under **Renders**. File → Open example has the bundled examples;
 opening or dropping a plain code file asks for its code-card settings.
 
+**Review frames** (Ctrl+Shift+R) is the careful route: Code → Review frames → Render video.
+It generates every frame of the video (a video program is run once and its frames kept) and
+opens them in a review window: one large frame, and a filmstrip of all of them marked
+✓ approved, ✎ edited, ⧉ held. Fix a frame that isn't right by painting on it (brush,
+rectangle, text, eraser; copy the paint to other selected frames), replacing it with an
+image, editing it in your image app (it updates when you save there), holding it for an
+extra frame or deleting it; Revert goes back to the generated frame. Approve frames one by
+one (Enter approves and moves on) or in a selection. **Render video** is enabled once every
+frame is approved and writes `<name>-reviewed-<time>.mp4` to Renders; sound effects move
+with deleted and held frames. Closing the review keeps its edits and Review frames picks up
+where you left off, as long as the video is the same; reviews live in the output folder's
+`frames/` subfolder (the 5 most recent are kept).
+
 ## Command line
 
 ```

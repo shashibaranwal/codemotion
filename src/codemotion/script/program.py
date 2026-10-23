@@ -12,6 +12,7 @@ Isolation, not a sandbox, exactly like ``runner.py``.
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import queue
 import re
@@ -20,7 +21,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -282,39 +283,14 @@ def run_program(
     return max(written, key=lambda path: after[path]), text, seconds
 
 
-def make_video(
-    source: str,
-    output: Path,
-    script_path: Path | None = None,
-    formats: tuple[ExportFormat, ...] = (),
-    on_output: Callable[[str], None] | None = None,
-    progress: ProgressCallback | None = None,
-    cancel: CancelToken | None = None,
-    timeout: float = config.PROGRAM_TIMEOUT_SECONDS,
-) -> ProgramResult:
-    """Run the program ``source``, import the video it writes as the MP4 ``output`` (with a
-    sidecar, like a render) and export ``formats`` next to it.
+@contextlib.contextmanager
+def program_files(source: str, script_path: Path | None) -> Iterator[tuple[Path, Path]]:
+    """(the script to run, its working folder) for the program ``source``.
 
     A saved file (``script_path``) runs in its own folder, so its relative paths work;
     when ``source`` differs from the file on disk, the edited text runs from a temp copy
     in that folder's place. Unsaved programs run in a temporary folder.
-    ``progress`` stages: "program" (from what it prints, e.g. "60/257"), "import", then
-    "gif" / "webm"; ``done`` is out of 1000.
     """
-    problem = incomplete(source)
-    if problem is not None:
-        raise ScriptRunError(*problem)
-    started = time.monotonic()
-    token = cancel or CancelToken()
-
-    def report(stage: str) -> Callable[[float], None]:
-        def update(fraction: float) -> None:
-            if progress is not None:
-                progress(Progress(round(fraction * 1000), 1000, time.monotonic() - started,
-                                  None, stage))  # fmt: skip
-
-        return update
-
     with tempfile.TemporaryDirectory(prefix="codemotion-program-") as tmp:
         saved = (
             script_path is not None
@@ -331,6 +307,45 @@ def make_video(
         else:
             workdir = Path(tmp) / "work"
             workdir.mkdir()
+        yield script, workdir
+
+
+def stage_reporter(progress: ProgressCallback | None) -> Callable[[str], Callable[[float], None]]:
+    """``report(stage)(fraction)`` sends ``Progress`` out of 1000 for that stage."""
+    started = time.monotonic()
+
+    def report(stage: str) -> Callable[[float], None]:
+        def update(fraction: float) -> None:
+            if progress is not None:
+                progress(Progress(round(fraction * 1000), 1000, time.monotonic() - started,
+                                  None, stage))  # fmt: skip
+
+        return update
+
+    return report
+
+
+def make_video(
+    source: str,
+    output: Path,
+    script_path: Path | None = None,
+    formats: tuple[ExportFormat, ...] = (),
+    on_output: Callable[[str], None] | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+    timeout: float = config.PROGRAM_TIMEOUT_SECONDS,
+) -> ProgramResult:
+    """Run the program ``source``, import the video it writes as the MP4 ``output`` (with a
+    sidecar, like a render) and export ``formats`` next to it. ``program_files`` says
+    where it runs. ``progress`` stages: "program" (from what it prints, e.g. "60/257"),
+    "import", then "gif" / "webm"; ``done`` is out of 1000.
+    """
+    problem = incomplete(source)
+    if problem is not None:
+        raise ScriptRunError(*problem)
+    token = cancel or CancelToken()
+    report = stage_reporter(progress)
+    with program_files(source, script_path) as (script, workdir):
         written, text, seconds = run_program(
             script, workdir, on_output, report("program"), lambda: token.cancelled, timeout
         )

@@ -356,3 +356,40 @@ way to override detection. Changes:
 - **Paste bug:** text copied from a web page often comes with web links, and the editor
   dropped such pastes entirely (it only meant to hand dropped *local files* to the
   window). It now pastes the text unless there are local files.
+
+## Frame review (2026-10-21)
+
+Requested: after the code, generate every frame, let the user fix frames that aren't right,
+and only render the final video once they've approved them. Added as a step between Code
+and Render (`review.py`, `desktop/review.py`); Render and Quick preview are unchanged.
+
+- **Every frame, not keyframes:** the request was about frames, and a fix to a keyframe
+  wouldn't say what happens between them. The filmstrip, Enter = approve and next, and
+  approving a selection keep a few hundred frames manageable.
+- **Edits are pixels, not code.** Paint layers (brush, rectangle, text, eraser),
+  replacement images, an external image editor, hold (duplicate) and delete. Changing the
+  code is the way to fix what the code got wrong; it makes a new review. Rejected: editing
+  element properties per frame (it would need a second animation model).
+- **A scene's frames are drawn on demand** from its `SceneDoc` (deterministic) instead of
+  stored: 300 PNGs at 1080x1920 would be ~1 GB and ~20 s to write. Only edited frames are
+  files. Thumbnails come from a 540p scene at the video's own frame rate
+  (`prepare_scene(..., fps=)`); the 15 fps preview would show every other frame twice.
+- **A program's frames are stored** as PNGs: the program runs once (it can take minutes),
+  and its frames are read from the file it wrote, not CodeMotion's re-encoded copy. Odd
+  sizes lose a row/column (H.264). PNGs are encoded with Skia, so CodeMotion itself still
+  doesn't import Pillow.
+- **Editing a frame un-approves it**, so every frame in the video was approved as it
+  will look. Render video stays disabled until all are approved; "Approve all" asks first.
+- **Reviews are folders** in `<output>/frames/<name>-<hash>/`, named by a hash of the scene
+  document (or the program text and path), so reopening the same video resumes and changed
+  code starts afresh. Changes are saved as they happen. The 5 most recent are kept; only
+  folders with a CodeMotion `session.json` are ever deleted.
+- **Rendering** streams the scene through `render_frames` (multiprocess as usual) and
+  swaps in edited frames; held and deleted frames work because the frame list stays in
+  source order. **Sound** follows the frames: a scene's cues move to where their frame (or
+  the next kept one) ended up; a program's recorded sound is cut per frame.
+- **The sidecar** is the program-style one plus `"review": {"frames", "edited"}`.
+- **External editing** opens the PNG with Windows' "edit" verb (Paint by default) and
+  reloads it when the file changes or the window is activated again.
+- **Not done:** the CLI has no review command; edits can't be carried over to a review of
+  changed code; reordering frames.

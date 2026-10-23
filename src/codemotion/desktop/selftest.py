@@ -1,7 +1,8 @@
 """``CodeMotion.exe --self-test REPORT``: check a packaged app works, without a screen.
 
 Opens the main window offscreen, runs the starter script (a child process), draws a
-preview still and renders a quick preview video (worker processes, ffmpeg). Writes one
+preview still, renders a quick preview video (worker processes, ffmpeg), then generates
+the frames for review, approves them all and renders the reviewed video. Writes one
 line per step to ``REPORT`` and returns 0 only if every step passed.
 """
 
@@ -51,16 +52,37 @@ def self_test(report: Path, timeout: float = 120.0) -> int:
             step("draw a preview still", wait(lambda: window.preview.frame.image is not None))
             rendered: list[Path] = []
             failed: list[str] = []
-            window.renderer.finished.connect(lambda outcome: rendered.append(outcome[1]))
+
+            def on_finished(outcome: tuple[object, object]) -> None:
+                if isinstance(outcome[1], Path):  # not the review's FrameSession
+                    rendered.append(outcome[1])
+
+            window.renderer.finished.connect(on_finished)
             window.renderer.failed.connect(lambda outcome: failed.append(str(outcome[1])))
             window.render_script(preview=True)
             wait(lambda: bool(rendered or failed))
             size = rendered[0].stat().st_size if rendered else 0
             detail = failed[0] if failed else f"{size} bytes"
             step("render a quick preview", size > 0, detail)
+            rendered.clear()
+            window.review_frames()
+            opened = wait(lambda: window.review_dialog is not None or bool(failed))
+            dialog = window.review_dialog
+            count = len(dialog.session.entries) if dialog is not None else 0
+            step("generate frames for review", opened and count > 0, f"{count} frames")
+            if dialog is not None:
+                dialog.session.approve(e.id for e in dialog.session.entries)
+                dialog.accept()
+                wait(lambda: bool(rendered or failed))
+                size = rendered[0].stat().st_size if rendered else 0
+                detail = failed[0] if failed else f"{size} bytes"
+                step("render the reviewed frames", size > 0, detail)
         finally:
             window.editor.document().setModified(False)
             window.close()
+            end = time.monotonic() + 1  # let the player let go of the video in the folder
+            while time.monotonic() < end:
+                app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
     lines.append("RESULT " + ("PASS" if ok else "FAIL"))
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0 if ok else 1

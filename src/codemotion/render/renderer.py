@@ -78,10 +78,13 @@ class StillRenderer:
         self._canvas: SkiaCanvas | None = None
 
     def render(self, t: float) -> SkiaCanvas:
+        return self.render_frame(frame_at(self.prepared, t))
+
+    def render_frame(self, frame: int) -> SkiaCanvas:
         if self._scene is None or self._canvas is None:
             self._scene = build_scene(self.prepared)
             self._canvas = SkiaCanvas(self.prepared.width, self.prepared.height)
-        self._scene.draw(self._canvas, frame_at(self.prepared, t))
+        self._scene.draw(self._canvas, frame)
         return self._canvas
 
 
@@ -182,10 +185,15 @@ def aspect_label(width: int, height: int) -> str:
 
 
 def write_program_sidecar(
-    video: Path, info: VideoInfo, source: str | None = None, exports: list[Path] | None = None
+    video: Path,
+    info: VideoInfo,
+    source: str | None = None,
+    exports: list[Path] | None = None,
+    extra: dict[str, object] | None = None,
 ) -> Path:
-    """The sidecar of a video a program wrote (so it's listed with the renders)."""
-    data = {
+    """The sidecar of a video a program wrote (so it's listed with the renders); ``extra``
+    adds or overrides keys (a frame review's video uses it too)."""
+    data: dict[str, object] = {
         "codemotion": __version__,
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "video": video.name,
@@ -197,6 +205,7 @@ def write_program_sidecar(
         "size": [info.width, info.height],
         "scene": {"aspect": aspect_label(info.width, info.height), "duration": info.duration},
         "warnings": [],
+        **(extra or {}),
     }
     path = sidecar_path(video)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

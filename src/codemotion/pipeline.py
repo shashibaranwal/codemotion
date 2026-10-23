@@ -216,10 +216,15 @@ def _load_image(element: ImageElement) -> npt.NDArray[np.uint8]:
         ) from None
 
 
-def prepare_scene(doc: SceneDoc, preview: bool = False) -> PreparedScene:
-    """Validate a scene document against its content and resolve layout and timing."""
+def prepare_scene(doc: SceneDoc, preview: bool = False, fps: int | None = None) -> PreparedScene:
+    """Validate a scene document against its content and resolve layout and timing.
+
+    ``fps`` overrides the frame rate (preview: 15, else the document's), e.g. for small
+    previews of every frame of the full video.
+    """
     theme = load_theme(doc.theme)
-    fps = config.PREVIEW_FPS if preview else doc.fps
+    if fps is None:
+        fps = config.PREVIEW_FPS if preview else doc.fps
     width, height = config.frame_size(doc.aspect.value, preview)
     every = list(walk(doc.elements))
     code_elements = [e for e in every if isinstance(e, CodeElement)]

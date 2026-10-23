@@ -116,7 +116,7 @@ def test_desktop_self_test_passes(tmp_path: Path, qtbot: object) -> None:
     report = tmp_path / "report.txt"
     assert self_test(report) == 0
     text = report.read_text("utf-8")
-    assert text.count("PASS") == 4 and "FAIL" not in text
+    assert text.count("PASS") == 6 and "FAIL" not in text
 
 
 def test_bench_measures_every_target() -> None:

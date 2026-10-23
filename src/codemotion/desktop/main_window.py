@@ -45,11 +45,14 @@ from codemotion.analysis.normalize import decode
 from codemotion.desktop.dialogs import CodeSettingsDialog
 from codemotion.desktop.editor import CodeEditor
 from codemotion.desktop.preview import PreviewPanel
+from codemotion.desktop.review import REGENERATE, FrameReviewDialog
 from codemotion.desktop.workers import (
+    FramesJob,
     LatestWins,
     ProgramJob,
     RenderJob,
     RenderWorker,
+    ReviewRenderJob,
     RunRequest,
     RunResult,
     run_source,
@@ -59,6 +62,7 @@ from codemotion.errors import UserFacingError
 from codemotion.models import ElementPlan, SoundPlan
 from codemotion.render.encoder import ExportFormat
 from codemotion.render.renderer import Progress, default_output, program_output
+from codemotion.review import FrameSession
 from codemotion.script.program import ProgramResult, incomplete
 from codemotion.script.runner import ScriptRunError
 from codemotion.script.source import SourceKind, SourceMode, source_kind
@@ -66,7 +70,8 @@ from codemotion.script.template import STARTER
 
 _LINE_ROLE = Qt.ItemDataRole.UserRole
 _PATH_ROLE = Qt.ItemDataRole.UserRole + 1
-_STAGE_LABELS = {"frames": "", "program": "Running the program ", "import": "Importing "}
+_STAGE_LABELS = {"frames": "", "program": "Running the program ", "import": "Importing ",
+                 "extract": "Collecting the frames "}  # fmt: skip
 
 PROGRAM_HINT = (
     "This is a video program: it draws its own frames (Pillow/OpenCV) and writes a video. "
@@ -161,7 +166,8 @@ class MainWindow(QMainWindow):
         self.result: RunResult | None = None  # the last successful run
         self.source_mode = SourceMode.auto  # Run as; reset for each file
         self.problems: list[Problem] = []
-        self._after_run: str | None = None  # "render" or "preview" once the run is current
+        self._after_run: str | None = None  # "render", "preview" or "review", once current
+        self.review_dialog: FrameReviewDialog | None = None
         self._preview_dir = Path(tempfile.mkdtemp(prefix="codemotion-preview-"))
         default_out = str(config.DESKTOP_OUTPUT_DIR.resolve())
         self.output_dir = Path(str(self.settings.value("output_dir", default_out)))
@@ -303,6 +309,10 @@ class MainWindow(QMainWindow):
             "Quick preview", lambda: self.render_script(preview=True), "Ctrl+Shift+Return",
             "Render a fast 540p, 15 fps preview and play it",
         )  # fmt: skip
+        self.review_action = self._action(
+            "Review frames", self.review_frames, "Ctrl+Shift+R",
+            "Generate every frame, fix and approve each one, then render the final video",
+        )  # fmt: skip
         self.render_action = self._action(
             "Render", lambda: self.render_script(), "Ctrl+R", "Render the full-quality MP4"
         )
@@ -327,7 +337,8 @@ class MainWindow(QMainWindow):
         toolbar = self.addToolBar("Main")
         toolbar.setObjectName("main_toolbar")
         toolbar.setMovable(False)
-        for action in (self.run_action, self.quick_action, self.render_action):
+        for action in (self.run_action, self.quick_action, self.review_action,
+                       self.render_action):  # fmt: skip
             toolbar.addAction(action)
         toolbar.addSeparator()
         toolbar.addAction(self.auto_run_action)
@@ -374,8 +385,8 @@ class MainWindow(QMainWindow):
             edit_menu.addAction(action)
 
         video_menu = bar.addMenu("&Video")
-        for action in (self.run_action, self.quick_action, self.render_action,
-                       self.cancel_action):  # fmt: skip
+        for action in (self.run_action, self.quick_action, self.review_action,
+                       self.render_action, self.cancel_action):  # fmt: skip
             video_menu.addAction(action)
         video_menu.addSeparator()
         video_menu.addAction(self.auto_run_action)
@@ -658,7 +669,10 @@ class MainWindow(QMainWindow):
         )
         if self._after_run is not None and result.request == self.current_request():
             action, self._after_run = self._after_run, None
-            self._start_render(preview=action == "preview")
+            if action == "review":
+                self._start_frames()
+            else:
+                self._start_render(preview=action == "preview")
 
     def _on_run_failed(self, error: Exception) -> None:
         line = error.line if isinstance(error, ScriptRunError) else None
@@ -805,6 +819,80 @@ class MainWindow(QMainWindow):
         self._set_rendering(True, "Running the program")
         self.statusBar().showMessage("Running the video program…")
 
+    # ------------------------------------------------------------------ frame review
+
+    def review_frames(self) -> None:
+        """Step 2 of Code → Review frames → Render: generate every frame (running the
+        script first if it changed) and open them for review."""
+        if self.renderer.busy:
+            self.statusBar().showMessage("A render is already running.")
+            return
+        current = self.result is not None and self.result.request == self.current_request()
+        if self.is_program or current:
+            self._start_frames()
+            return
+        self._after_run = "review"
+        if not self.run():
+            self._after_run = None
+
+    def _start_frames(self) -> None:
+        if self.renderer.busy:
+            return
+        stem = self.path.stem if self.path else "untitled"
+        if self.is_program:
+            job = FramesJob(self.output_dir, stem, source=self.editor.toPlainText(),
+                            script_path=self.path)  # fmt: skip
+            self.editor.set_error_line(None)
+            self._set_problems([])
+            self._fill_elements([])
+            self.output_view.clear()
+            self.bottom_tabs.setCurrentWidget(self.output_view)
+        elif self.result is not None:
+            job = FramesJob(self.output_dir, stem, doc=self.result.loaded.doc,
+                            script_path=self.path)  # fmt: skip
+        else:
+            return
+        self.renderer.start(job)
+        self._set_rendering(True, "Generating the frames")
+        self.statusBar().showMessage("Generating the frames…")
+
+    def _open_review(self, session: FrameSession) -> None:
+        dialog = FrameReviewDialog(session, self)
+        dialog.finished.connect(lambda code: self._on_review_closed(session, code))
+        self.review_dialog = dialog
+        count = len(session.entries)
+        self.statusBar().showMessage(f"Review the {count} frames, then render the video.")
+        dialog.open()
+
+    def _on_review_closed(self, session: FrameSession, code: int) -> None:
+        self.review_dialog = None
+        if code == REGENERATE:
+            session.discard()
+            self.review_frames()
+        elif code == FrameReviewDialog.DialogCode.Accepted.value:
+            self._render_review(session)
+        else:
+            edited = session.edited_count
+            kept = f"; your edits to {edited} frames are kept" if edited else ""
+            self.statusBar().showMessage(
+                f"Review closed: {session.approved_count} of {len(session.entries)} frames "
+                f"approved{kept}. Review frames picks up where you left off."
+            )
+
+    def _render_review(self, session: FrameSession) -> None:
+        if self.renderer.busy:
+            return
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            message = f"Could not create {self.output_dir}: {exc.strerror}."
+            self._set_problems([Problem("error", message)])
+            return
+        stem = self.path.stem if self.path else "untitled"
+        output = program_output(f"{stem}-reviewed", self.output_dir)
+        self.renderer.start(ReviewRenderJob(session, output, self.export_formats()))
+        self._set_rendering(True, "Rendering the reviewed frames")
+
     def export_formats(self) -> tuple[ExportFormat, ...]:
         """Extra formats a full render writes, from Video → Also export …"""
         formats: list[ExportFormat] = []
@@ -825,7 +913,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(active)
         self.progress_bar.setValue(0)
         self.progress_label.setText(f"{what} starting…" if active else "")
-        for action in ("render_action", "quick_action"):
+        for action in ("render_action", "quick_action", "review_action"):
             if hasattr(self, action):
                 getattr(self, action).setEnabled(not active)
         if hasattr(self, "cancel_action"):
@@ -838,10 +926,16 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(f"{stage}{progress.fraction:.0%}{eta}")
 
     def _on_render_finished(
-        self, outcome: tuple[RenderJob, Path] | tuple[ProgramJob, ProgramResult]
+        self,
+        outcome: tuple[RenderJob | ReviewRenderJob, Path]
+        | tuple[ProgramJob, ProgramResult]
+        | tuple[FramesJob, FrameSession],
     ) -> None:
         job, result = outcome
         self._set_rendering(False)
+        if isinstance(result, FrameSession):
+            self._open_review(result)
+            return
         video = result.video if isinstance(result, ProgramResult) else result
         if not job.preview:
             self.refresh_renders(select=video)
@@ -854,16 +948,27 @@ class MainWindow(QMainWindow):
                 f"{info.height} · {info.duration:g} s · {video}"
             )
             return
+        if isinstance(job, ReviewRenderJob):
+            count = len(job.session.entries)
+            self.statusBar().showMessage(f"Rendered {count} reviewed frames: {video}")
+            return
         what = "Preview" if job.preview else "Rendered"
         self.statusBar().showMessage(f"{what}: {video}")
 
     def _on_render_failed(
-        self, outcome: tuple[RenderJob, Exception] | tuple[ProgramJob, Exception]
+        self, outcome: tuple[RenderJob | ProgramJob | FramesJob | ReviewRenderJob, Exception]
     ) -> None:
         job, error = outcome
         self._set_rendering(False)
         message = error.message if isinstance(error, UserFacingError) else repr(error)
-        if isinstance(job, ProgramJob):
+        if isinstance(job, FramesJob) and job.source is not None:
+            line = error.line if isinstance(error, ScriptRunError) else None
+            self._set_problems([Problem("error", f"The program failed: {message}", line)])
+            self.editor.set_error_line(line)
+        elif isinstance(job, FramesJob):
+            failure = Problem("error", f"Generating the frames failed: {message}")
+            self._set_problems([*self.problems, failure])
+        elif isinstance(job, ProgramJob):
             line = error.line if isinstance(error, ScriptRunError) else None
             self._set_problems([Problem("error", f"The program failed: {message}", line)])
             self.editor.set_error_line(line)
@@ -872,8 +977,11 @@ class MainWindow(QMainWindow):
         self.bottom_tabs.setCurrentWidget(self.problem_list)
         self.statusBar().showMessage("Render failed; see Problems.")
 
-    def _on_render_cancelled(self, job: RenderJob) -> None:
+    def _on_render_cancelled(self, job: object) -> None:
         self._set_rendering(False)
+        if isinstance(job, FramesJob):
+            self.statusBar().showMessage("Generating the frames was cancelled.")
+            return
         self.statusBar().showMessage("Render cancelled; no video was written.")
 
     # ------------------------------------------------------------------ renders list
@@ -968,6 +1076,8 @@ class MainWindow(QMainWindow):
         if not self.maybe_save():
             event.ignore()
             return
+        if self.review_dialog is not None:
+            self.review_dialog.reject()  # its edits are already saved
         if self.renderer.busy:
             self.renderer.cancel()
             self.renderer.wait(10)

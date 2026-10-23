@@ -244,6 +244,13 @@ TRUST_NOTICE: Final = "Scripts are Python and run on this computer. Only run scr
 AUTO_RUN_DELAY_MS: Final = 600  # run this long after typing stops
 SCRUB_STEP_SECONDS: Final = 1 / 30  # scrubber resolution
 RECENT_FILES_MAX: Final = 8
+# Frame review (review.py): reviews live in <output folder>/frames/<name>-<key>/.
+REVIEW_FOLDER: Final = "frames"
+REVIEW_SESSIONS_KEPT: Final = 5  # older reviews are deleted when a new one starts
+REVIEW_THUMB_HEIGHT: Final = 96  # px, filmstrip thumbnails
+REVIEW_UNDO_STEPS: Final = 30  # paint strokes that can be undone per frame
+REVIEW_PAINT_COLOR: Final = "#FF3B30"
+REVIEW_PAINT_SIZE: Final = 12  # px at the frame's size
 EDITOR_FONT_POINT_SIZE: Final = 11
 EDITOR_INDENT: Final = "    "
 
@@ -259,6 +266,7 @@ UI_COLORS: Final = {
     "highlighted_text": "#FFFFFF",
     "error": "#F2545B",
     "warning": "#E8B04B",
+    "ok": "#4CC38A",
 }
 EDITOR_COLORS: Final = {
     "background": "#16181F",
